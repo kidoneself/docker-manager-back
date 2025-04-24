@@ -1,81 +1,70 @@
 package com.dsm.service.impl;
 
+import com.dsm.mapper.TemplateMapper;
+import com.dsm.pojo.common.PageResult;
 import com.dsm.pojo.entity.Template;
+import com.dsm.pojo.param.TemplateQueryParam;
 import com.dsm.service.TemplateService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 模板服务实现类
  * 管理容器模板的创建、查询、更新和删除
  */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class TemplateServiceImpl implements TemplateService {
-
-    // 模拟模板存储，实际项目中应该使用持久化存储
-    private final List<Template> templates = new ArrayList<>();
-
-    public TemplateServiceImpl() {
-        // 初始化一些示例模板数据
-        templates.add(new Template(
-                "1",
-                "Nginx Web服务器",
-                "基于Nginx的Web服务器模板",
-                "nginx:latest",
-                "PORT=80",
-                "80:80",
-                "2024-04-07 10:00:00"
-        ));
-
-        templates.add(new Template(
-                "2",
-                "MySQL数据库",
-                "MySQL数据库服务器模板",
-                "mysql:8.0",
-                "MYSQL_ROOT_PASSWORD=root\nMYSQL_DATABASE=test",
-                "3306:3306",
-                "2024-04-07 10:30:00"
-        ));
-
-        templates.add(new Template(
-                "3",
-                "Redis缓存",
-                "Redis缓存服务器模板",
-                "redis:latest",
-                "REDIS_PASSWORD=redis",
-                "6379:6379",
-                "2024-04-07 11:00:00"
-        ));
-    }
+    private final TemplateMapper templateMapper;
 
     @Override
-    public List<Template> getTemplates() {
-        return templates;
+    public PageResult<Template> getTemplates(TemplateQueryParam param) {
+        // 查询数据
+        var records = templateMapper.selectTemplates(param);
+        // 查询总数
+        var total = templateMapper.countTemplates(param);
+        
+        // 构建分页结果
+        var result = new PageResult<Template>();
+        result.setRecords(records);
+        result.setTotal(total);
+        result.setSize(param.getSize());
+        result.setCurrent(param.getPage());
+        result.setPages((total + param.getSize() - 1) / param.getSize());
+        
+        return result;
     }
 
     @Override
     public Template getTemplate(String id) {
-        return templates.stream()
-                .filter(t -> t.getId().equals(id))
-                .findFirst()
-                .orElse(null);
+        return templateMapper.selectTemplateById(id);
+    }
+
+    @Override
+    public Template getTemplateInstallConfig(String id) {
+        // 获取模板详情
+        var template = getTemplate(id);
+        if (template == null) {
+            return null;
+        }
+        // 这里可以添加额外的安装配置处理逻辑
+        return template;
     }
 
     @Override
     public void addTemplate(Template template) {
-        templates.add(template);
+        templateMapper.insertTemplate(template);
     }
 
     @Override
     public void updateTemplate(Template template) {
-        templates.removeIf(t -> t.getId().equals(template.getId()));
-        templates.add(template);
+        templateMapper.updateTemplate(template);
     }
 
     @Override
     public void deleteTemplate(String id) {
-        templates.removeIf(t -> t.getId().equals(id));
+        // 实现删除逻辑
     }
 } 

@@ -3,9 +3,12 @@ package com.dsm.exception;
 import com.dsm.utils.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.util.Map;
 
 /**
  * 全局异常处理器
@@ -35,13 +38,30 @@ public class GlobalExceptionHandler {
         return ApiResponse.success(null, "系统内部错误");
     }
 
+
+    @ExceptionHandler(DockerOperationException.class)
+    public ApiResponse<Map<String, Object>> handleDockerException(DockerOperationException ex) {
+        log.error("Docker异常", ex);
+        return ApiResponse.error(ex.getDetail());
+        //这个是是不带详情的
+        //return ApiResponse.error(ex.getErrorCode().getMessage());
+
+    }
+
     /**
      * 处理其他异常
      */
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public ApiResponse<?> handleException(Exception e) {
+    public ApiResponse<Void> handleException(Exception e) {
         log.error("系统异常", e);
-        return ApiResponse.success(null, "系统异常，请联系管理员");
+        return ApiResponse.error("系统异常，请稍后重试");
+    }
+
+    @ExceptionHandler(BindException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleBindException(BindException e) {
+        log.error("参数校验异常", e);
+        return ApiResponse.error("参数校验失败：" + e.getBindingResult().getAllErrors().get(0).getDefaultMessage());
     }
 }

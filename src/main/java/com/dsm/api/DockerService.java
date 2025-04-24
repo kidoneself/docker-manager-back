@@ -1,7 +1,7 @@
 package com.dsm.api;
 
 import com.dsm.config.AppConfig;
-import com.dsm.exception.BusinessException;
+import com.dsm.exception.DockerErrorResolver;
 import com.dsm.pojo.request.ContainerCreateRequest;
 import com.dsm.utils.DockerComposeUtils;
 import com.dsm.websocket.callback.PullImageCallback;
@@ -16,9 +16,9 @@ import com.github.dockerjava.core.command.LogContainerResultCallback;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.Resource;
 import java.io.*;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 public class DockerService {
     private final DockerClient dockerClient;
 
-    @Autowired
+    @Resource
     private AppConfig appConfig;
 
     /**
@@ -46,10 +46,8 @@ public class DockerService {
      */
     public DockerService() {
         DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().withDockerHost("unix:///var/run/docker.sock").build();
-
         // 创建带代理的 HTTP 客户端
         ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost()).maxConnections(100).connectionTimeout(Duration.ofSeconds(30)).responseTimeout(Duration.ofSeconds(45));
-
 
         DockerHttpClient httpClient = httpClientBuilder.build();
 
@@ -62,7 +60,7 @@ public class DockerService {
      * @return 容器列表，包括运行中和已停止的容器
      */
     public List<Container> listContainers() {
-        return dockerClient.listContainersCmd().withShowAll(true).exec();
+        return executeDockerCommandWithResult(() -> dockerClient.listContainersCmd().withShowAll(true).exec(), "获取容器列表", "all");
     }
 
     /**
@@ -71,7 +69,7 @@ public class DockerService {
      * @return 镜像列表，包括所有本地镜像
      */
     public List<Image> listImages() {
-        return dockerClient.listImagesCmd().withShowAll(true).exec();
+        return executeDockerCommandWithResult(() -> dockerClient.listImagesCmd().withShowAll(true).exec(), "获取镜像列表", "all");
     }
 
 
@@ -82,12 +80,10 @@ public class DockerService {
      * @throws RuntimeException 如果启动失败
      */
     public void startContainer(String containerId) {
-        try {
+        executeDockerCommand(() -> {
             dockerClient.startContainerCmd(containerId).exec();
-        } catch (Exception e) {
-            log.error("启动容器失败: {}", e.getMessage());
-            throw new BusinessException("启动容器失败: " + e.getMessage());
-        }
+            log.info("启动容器成功: {}", containerId);
+        }, "启动容器", containerId);
     }
 
     /**
@@ -97,21 +93,10 @@ public class DockerService {
      * @throws RuntimeException 如果停止失败
      */
     public void stopContainer(String containerId) {
-        try {
+        executeDockerCommand(() -> {
             dockerClient.stopContainerCmd(containerId).exec();
             log.info("停止容器成功: {}", containerId);
-        } catch (Exception e) {
-            // 检查是否为304状态码（Not Modified），表示容器已经停止
-            String errorMsg = e.getMessage();
-            if (errorMsg != null && errorMsg.contains("Status 304")) {
-                log.info("容器已经处于停止状态: {}", containerId);
-                return; // 容器已经停止，视为成功
-            }
-
-            // 其他错误则正常抛出
-            log.error("停止容器失败: {}", e.getMessage());
-            throw new RuntimeException("Failed to stop container", e);
-        }
+        }, "停止容器", containerId);
     }
 
     /**
@@ -195,16 +180,16 @@ public class DockerService {
     /**
      * 执行Docker命令并处理异常
      *
-     * @param command       要执行的命令
-     * @param operationName 操作名称（用于日志）
-     * @param containerId   容器ID或名称
+     * @param command     要执行的命令
+     * @param action      操作名称（用于日志）
+     * @param containerId 容器ID或名称
      */
-    private void executeDockerCommand(Runnable command, String operationName, String containerId) {
+    private void executeDockerCommand(Runnable command, String action, String containerId) {
         try {
             command.run();
         } catch (Exception e) {
-            log.error("{}失败: {}", operationName, e.getMessage());
-            throw new RuntimeException("Failed to " + operationName.toLowerCase(), e);
+            log.error("{}失败: {}", action, e.getMessage());
+            throw DockerErrorResolver.resolve(action, containerId, e);
         }
     }
 
@@ -221,8 +206,8 @@ public class DockerService {
         try {
             return supplier.get();
         } catch (Exception e) {
-            log.error("{}失败: {}", operationName, e.getMessage());
-            throw new RuntimeException("Failed to " + operationName.toLowerCase(), e);
+            log.error("{}失败: {}", operationName, e.getMessage(), e);
+            throw DockerErrorResolver.resolve(operationName, containerId, e);
         }
     }
 
@@ -244,14 +229,15 @@ public class DockerService {
      * @return true如果可用，false如果不可用
      */
     public boolean isDockerAvailable() {
-        try {
-            // 尝试ping Docker服务
-            dockerClient.pingCmd().exec();
-            return true;
-        } catch (Exception e) {
-            log.error("Docker服务不可用: {}", e.getMessage());
-            return false;
-        }
+        return executeDockerCommandWithResult(() -> {
+            try {
+                dockerClient.pingCmd().exec();
+                return true;
+            } catch (Exception e) {
+                log.error("Docker服务不可用: {}", e.getMessage());
+                return false;
+            }
+        }, "检查Docker服务可用性", "system");
     }
 
     /**
@@ -264,21 +250,24 @@ public class DockerService {
      * @return 日志内容
      */
     public String getContainerLogs(String containerId, int tail, boolean follow, boolean timestamps) {
-        try {
+        return executeDockerCommandWithResult(() -> {
             LogContainerCmd logContainerCmd = dockerClient.logContainerCmd(containerId).withTail(tail).withFollowStream(follow).withTimestamps(timestamps).withStdOut(true).withStdErr(true);
 
             StringBuilder logs = new StringBuilder();
-            logContainerCmd.exec(new LogContainerResultCallback() {
-                @Override
-                public void onNext(Frame frame) {
-                    logs.append(new String(frame.getPayload())).append("\n");
-                }
-            }).awaitCompletion();
+            try {
+                logContainerCmd.exec(new LogContainerResultCallback() {
+                    @Override
+                    public void onNext(Frame frame) {
+                        logs.append(new String(frame.getPayload())).append("\n");
+                    }
+                }).awaitCompletion();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("获取容器日志被中断", e);
+            }
 
             return logs.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("获取容器日志失败: " + e.getMessage(), e);
-        }
+        }, "获取容器日志", containerId);
     }
 
     /**
@@ -474,7 +463,7 @@ public class DockerService {
      * @return 镜像详细信息
      */
     public InspectImageResponse getInspectImage(String imageId) {
-        return dockerClient.inspectImageCmd(imageId).exec();
+        return executeDockerCommandWithResult(() -> dockerClient.inspectImageCmd(imageId).exec(), "获取镜像详细信息", imageId);
     }
 
     /**
@@ -483,7 +472,7 @@ public class DockerService {
      * @return 镜像详细信息
      */
     public InspectContainerResponse inspectContainerCmd(String containerId) {
-        return dockerClient.inspectContainerCmd(containerId).exec();
+        return executeDockerCommandWithResult(() -> dockerClient.inspectContainerCmd(containerId).exec(), "获取容器详细信息", containerId);
     }
 
     /**
@@ -795,7 +784,7 @@ public class DockerService {
     }
 
     public List<Network> listNetworks() {
-        return dockerClient.listNetworksCmd().exec();
+        return executeDockerCommandWithResult(() -> dockerClient.listNetworksCmd().exec(), "获取网络列表", "all");
     }
 
     public Network inspectNetwork(String networkId) {
@@ -832,26 +821,23 @@ public class DockerService {
             String serviceName = entry.getKey();
             DockerComposeUtils.ServiceConfig config = entry.getValue();
 
-            try {
-                // 拉取镜像
-                dockerClient.pullImageCmd(config.getImage()).start().awaitCompletion();
+            executeDockerCommand(() -> {
+                try {
+                    // 拉取镜像
+                    dockerClient.pullImageCmd(config.getImage()).start().awaitCompletion();
 
-                // 创建容器
-                CreateContainerResponse container = dockerClient.createContainerCmd(config.getImage())
-                        .withName(config.getContainerName())
-                        .withPortBindings(config.getPortBindings().toArray(new PortBinding[0]))
-                        .withVolumes(config.getVolumes().toArray(new Volume[0]))
-                        .exec();
+                    // 创建容器
+                    CreateContainerResponse container = dockerClient.createContainerCmd(config.getImage()).withName(config.getContainerName()).withPortBindings(config.getPortBindings().toArray(new PortBinding[0])).withVolumes(config.getVolumes().toArray(new Volume[0])).exec();
 
-                // 启动容器
-                dockerClient.startContainerCmd(container.getId()).exec();
+                    // 启动容器
+                    dockerClient.startContainerCmd(container.getId()).exec();
 
-                log.info("Service {} (Container {}) started successfully", serviceName, config.getContainerName());
-            } catch (Exception e) {
-                log.error("Error starting service {} (Container {}): {}",
-                        serviceName, config.getContainerName(), e.getMessage());
-                throw new RuntimeException("Failed to start service " + serviceName, e);
-            }
+                    log.info("Service {} (Container {}) started successfully", serviceName, config.getContainerName());
+                } catch (Exception e) {
+                    log.error("Error starting service {} (Container {}): {}", serviceName, config.getContainerName(), e.getMessage());
+                    throw new RuntimeException("Failed to start service " + serviceName, e);
+                }
+            }, "执行Docker Compose", serviceName);
         }
     }
 

@@ -1,14 +1,16 @@
 package com.dsm.service;
 
+import com.dsm.pojo.common.PageResult;
 import com.dsm.pojo.entity.Template;
-
-import java.util.List;
+import com.dsm.pojo.param.TemplateQueryParam;
 
 public interface TemplateService {
 
-    List<Template> getTemplates();
+    PageResult<Template> getTemplates(TemplateQueryParam param);
 
     Template getTemplate(String id);
+
+    Template getTemplateInstallConfig(String id);
 
     void addTemplate(Template template);
 

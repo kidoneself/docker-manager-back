@@ -22,16 +22,13 @@ public class ProxyConfigLoader {
     @PostConstruct
     public void initProxy() {
         String proxyUrl = systemSettingService.get("proxy");
-
         if (proxyUrl == null || proxyUrl.isBlank()) {
             System.out.println("未设置HTTP代理，跳过代理设置");
             return;
         }
-        System.out.println(proxyUrl);
         JSONObject jsonObject = JSONObject.parseObject(proxyUrl);
         String url = jsonObject.getString("url");
         appConfig.setProxyUrl(url); // ✅ 设置到全局字段
-
         try {
             URI uri = new URI(url);
             System.out.println("已设置系统 HTTP 代理: " + proxyUrl);

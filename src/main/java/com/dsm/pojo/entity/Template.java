@@ -1,15 +1,17 @@
 package com.dsm.pojo.entity;
 
-import lombok.AllArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import java.time.LocalDateTime;
 
 /**
  * Docker容器模板实体类
  */
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
+@Slf4j
 public class Template {
     /**
      * 模板ID
@@ -22,27 +24,62 @@ public class Template {
     private String name;
 
     /**
+     * 模板分类
+     */
+    private String category;
+
+    /**
+     * 模板版本
+     */
+    private String version;
+
+    /**
      * 模板描述
      */
     private String description;
 
     /**
-     * 基础镜像
+     * 模板图标URL
      */
-    private String baseImage;
+    private String iconUrl;
 
     /**
-     * 环境变量配置
+     * 模板内容
      */
-    private String envConfig;
-
-    /**
-     * 端口映射配置
-     */
-    private String portConfig;
+    @JsonIgnore
+    private String template;
 
     /**
      * 创建时间
      */
-    private String created;
+    private LocalDateTime createdAt;
+
+    /**
+     * 更新时间
+     */
+    private LocalDateTime updatedAt;
+
+    /**
+     * 排序权重
+     */
+    private Integer sortWeight;
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    public TemplateContent getTemplateContent() {
+        try {
+            return objectMapper.readValue(template, TemplateContent.class);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse template content", e);
+            return null;
+        }
+    }
+
+    public void setTemplateContent(TemplateContent content) {
+        try {
+            this.template = objectMapper.writeValueAsString(content);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize template content", e);
+        }
+    }
 } 

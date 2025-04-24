@@ -1,7 +1,6 @@
 package com.dsm.service.impl;
 
 import com.dsm.api.DockerService;
-import com.dsm.exception.BusinessException;
 import com.dsm.pojo.dto.image.ImageInspectDTO;
 import com.dsm.pojo.entity.ContainerDetail;
 import com.dsm.pojo.request.ContainerCreateRequest;
@@ -56,96 +55,82 @@ public class ContainerServiceImpl implements ContainerService {
 
     @Override
     public void removeContainer(String containerId) {
-        try {
-            dockerService.removeContainer(containerId);
-        } catch (Exception e) {
-            throw new RuntimeException("删除容器失败: " + e.getMessage());
-        }
+        dockerService.removeContainer(containerId);
     }
 
     @Override
     public Statistics getContainerStats(String containerId) {
-        try {
-            return dockerService.getContainerStats(containerId);
-        } catch (Exception e) {
-            throw new RuntimeException("获取容器信息失败: " + e.getMessage());
-        }
+        return dockerService.getContainerStats(containerId);
+
     }
 
     @Override
     public ContainerDetail getContainerConfig(String containerId) {
-        try {
-            // 获取容器详细信息
-            InspectContainerResponse inspectResponse = dockerService.inspectContainerCmd(containerId);
+        // 获取容器详细信息
+        InspectContainerResponse inspectResponse = dockerService.inspectContainerCmd(containerId);
 
-            // 创建并填充 ContainerDetail2 对象
-            ContainerDetail containerDetail = new ContainerDetail();
+        // 创建并填充 ContainerDetail2 对象
+        ContainerDetail containerDetail = new ContainerDetail();
 
-            // 基本信息
-            containerDetail.setImage(inspectResponse.getConfig().getImage());
-            containerDetail.setName(inspectResponse.getName().replaceFirst("/", ""));
+        // 基本信息
+        containerDetail.setImage(inspectResponse.getConfig().getImage());
+        containerDetail.setName(inspectResponse.getName().replaceFirst("/", ""));
 
-            // 重启策略
-            RestartPolicy restartPolicy = inspectResponse.getHostConfig().getRestartPolicy();
-            if (restartPolicy != null) {
-                containerDetail.setRestartPolicy(restartPolicy.getName());
-            }
-
-            // 网络模式
-            containerDetail.setNetworkMode(inspectResponse.getHostConfig().getNetworkMode());
-
-            // 端口映射
-            List<ContainerDetail.PortMapping> portMappings = new ArrayList<>();
-            if (inspectResponse.getNetworkSettings().getPorts() != null) {
-                inspectResponse.getNetworkSettings().getPorts().getBindings().forEach((containerPort, hostPorts) -> {
-                    if (hostPorts != null && hostPorts.length > 0) {
-                        ContainerDetail.PortMapping mapping = new ContainerDetail.PortMapping();
-                        mapping.setContainerPort(containerPort.getPort());
-                        mapping.setProtocol(containerPort.getProtocol().toString());
-                        mapping.setHostPort(Integer.parseInt(hostPorts[0].getHostPortSpec()));
-                        portMappings.add(mapping);
-                    }
-                });
-            }
-            containerDetail.setPortMappings(portMappings);
-
-            // 卷映射
-            List<ContainerDetail.VolumeMapping> volumeMappings = new ArrayList<>();
-            if (inspectResponse.getMounts() != null) {
-                for (InspectContainerResponse.Mount mount : inspectResponse.getMounts()) {
-                    ContainerDetail.VolumeMapping mapping = new ContainerDetail.VolumeMapping();
-                    mapping.setHostPath(mount.getSource());
-                    mapping.setContainerPath(Objects.requireNonNull(mount.getDestination()).getPath());
-                    mapping.setReadOnly(Boolean.FALSE.equals(mount.getRW()));
-                    volumeMappings.add(mapping);
-                }
-            }
-            containerDetail.setVolumeMappings(volumeMappings);
-
-            // 环境变量
-            List<ContainerDetail.EnvironmentVariable> envVars = new ArrayList<>();
-            if (inspectResponse.getConfig().getEnv() != null) {
-                for (String env : inspectResponse.getConfig().getEnv()) {
-                    String[] parts = env.split("=", 2);
-                    if (parts.length == 2) {
-                        ContainerDetail.EnvironmentVariable envVar = new ContainerDetail.EnvironmentVariable();
-                        envVar.setKey(parts[0]);
-                        envVar.setValue(parts[1]);
-                        envVars.add(envVar);
-                    }
-                }
-            }
-            containerDetail.setEnvironmentVariables(envVars);
-
-            // 特权模式
-            containerDetail.setPrivileged(inspectResponse.getHostConfig().getPrivileged());
-            ImageInspectDTO dto = new ImageInspectDTO();
-
-
-            return containerDetail;
-        } catch (Exception e) {
-            throw new RuntimeException("获取容器配置失败: " + e.getMessage());
+        // 重启策略
+        RestartPolicy restartPolicy = inspectResponse.getHostConfig().getRestartPolicy();
+        if (restartPolicy != null) {
+            containerDetail.setRestartPolicy(restartPolicy.getName());
         }
+
+        // 网络模式
+        containerDetail.setNetworkMode(inspectResponse.getHostConfig().getNetworkMode());
+
+        // 端口映射
+        List<ContainerDetail.PortMapping> portMappings = new ArrayList<>();
+        if (inspectResponse.getNetworkSettings().getPorts() != null) {
+            inspectResponse.getNetworkSettings().getPorts().getBindings().forEach((containerPort, hostPorts) -> {
+                if (hostPorts != null && hostPorts.length > 0) {
+                    ContainerDetail.PortMapping mapping = new ContainerDetail.PortMapping();
+                    mapping.setContainerPort(containerPort.getPort());
+                    mapping.setProtocol(containerPort.getProtocol().toString());
+                    mapping.setHostPort(Integer.parseInt(hostPorts[0].getHostPortSpec()));
+                    portMappings.add(mapping);
+                }
+            });
+        }
+        containerDetail.setPortMappings(portMappings);
+
+        // 卷映射
+        List<ContainerDetail.VolumeMapping> volumeMappings = new ArrayList<>();
+        if (inspectResponse.getMounts() != null) {
+            for (InspectContainerResponse.Mount mount : inspectResponse.getMounts()) {
+                ContainerDetail.VolumeMapping mapping = new ContainerDetail.VolumeMapping();
+                mapping.setHostPath(mount.getSource());
+                mapping.setContainerPath(Objects.requireNonNull(mount.getDestination()).getPath());
+                mapping.setReadOnly(Boolean.FALSE.equals(mount.getRW()));
+                volumeMappings.add(mapping);
+            }
+        }
+        containerDetail.setVolumeMappings(volumeMappings);
+
+        // 环境变量
+        List<ContainerDetail.EnvironmentVariable> envVars = new ArrayList<>();
+        if (inspectResponse.getConfig().getEnv() != null) {
+            for (String env : inspectResponse.getConfig().getEnv()) {
+                String[] parts = env.split("=", 2);
+                if (parts.length == 2) {
+                    ContainerDetail.EnvironmentVariable envVar = new ContainerDetail.EnvironmentVariable();
+                    envVar.setKey(parts[0]);
+                    envVar.setValue(parts[1]);
+                    envVars.add(envVar);
+                }
+            }
+        }
+        containerDetail.setEnvironmentVariables(envVars);
+        // 特权模式
+        containerDetail.setPrivileged(inspectResponse.getHostConfig().getPrivileged());
+        ImageInspectDTO dto = new ImageInspectDTO();
+        return containerDetail;
     }
 
     @Override
@@ -275,7 +260,6 @@ public class ContainerServiceImpl implements ContainerService {
         }
 
     }
-
 
 
     public boolean isContainerRunning(String containerId) {

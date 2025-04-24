@@ -65,7 +65,7 @@
         },
         "HostConfig": {
           "PortBindings": {
-            "9000/tcp": "9000"
+            "9000/tcp": "{{QB_PORT}}"
           },
           "Binds": [
             "{{MEDIA_PATH}}:/media",
@@ -93,6 +93,11 @@
       "key": "MEDIA_PATH",
       "name": "媒体文件路径",
       "value": "/Users/lizhiqiang/coding-my/media"
+    },
+    {
+      "key": "QB_PORT",
+      "name": "Qbittorrent端口",
+      "value": "9000"
     }
   ]
 }

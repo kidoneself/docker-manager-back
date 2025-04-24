@@ -167,6 +167,34 @@ CREATE TABLE IF NOT EXISTS system_settings
 ) PRIMARY KEY,
     setting_value TEXT
     );
+
+
+
+CREATE TABLE IF NOT EXISTS application_templates
+(
+    -- 主键ID，应用模板的唯一标识
+    id          TEXT PRIMARY KEY,
+    -- 应用名称，用于显示
+    name        TEXT NOT NULL,
+    -- 应用分类，用于分类展示
+    category    TEXT,
+    -- 应用版本号
+    version     TEXT,
+    -- 应用描述
+    description TEXT,
+    -- 应用图标URL
+    icon_url    TEXT,
+    -- 应用模板数据，使用JSON格式存储完整的模板配置
+    template    TEXT NOT NULL,
+    -- 创建时间
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- 更新时间
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- 排序权重
+    sort_weight INTEGER   DEFAULT 0
+
+);
+
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_containers_name ON containers(name);
 CREATE INDEX IF NOT EXISTS idx_templates_name ON templates(name);

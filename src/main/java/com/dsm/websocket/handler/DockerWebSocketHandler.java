@@ -14,6 +14,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -32,6 +33,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DockerWebSocketHandler extends TextWebSocketHandler {
     
     private static final Map<String, WebSocketSession> SESSIONS = new ConcurrentHashMap<>();
+    
+    /**
+     * 安装会话管理
+     * key: sessionId
+     * value: 安装会话信息
+     */
+    private static final Map<String, InstallSession> INSTALL_SESSIONS = new ConcurrentHashMap<>();
     
     @Autowired
     private DockerService dockerService;
@@ -63,6 +71,18 @@ public class DockerWebSocketHandler extends TextWebSocketHandler {
                 case "PULL_IMAGE":
                     handlePullImage(session, wsMessage);
                     break;
+                case "INSTALL_CHECK_IMAGES":
+                    handleInstallCheckImages(session, wsMessage);
+                    break;
+                case "INSTALL_PULL_IMAGE":
+                    handleInstallPullImage(session, wsMessage);
+                    break;
+                case "INSTALL_VALIDATE":
+                    handleInstallValidate(session, wsMessage);
+                    break;
+                case "INSTALL_START":
+                    handleInstallStart(session, wsMessage);
+                    break;
                 default:
                     log.warn("未知的消息类型: {}", wsMessage.getType());
             }
@@ -82,6 +102,7 @@ public class DockerWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String sessionId = session.getId();
         SESSIONS.remove(sessionId);
+        // TODO: 处理安装会话的清理
         log.info("WebSocket连接已关闭: {}", sessionId);
     }
     
@@ -150,6 +171,58 @@ public class DockerWebSocketHandler extends TextWebSocketHandler {
     }
     
     /**
+     * 处理检查安装所需镜像的请求
+     * 
+     * @param session WebSocket会话
+     * @param message WebSocket消息
+     */
+    private void handleInstallCheckImages(WebSocketSession session, DockerWebSocketMessage message) {
+        // TODO: 实现检查安装所需镜像的逻辑
+        // 1. 获取需要检查的镜像列表
+        // 2. 检查每个镜像是否存在
+        // 3. 返回检查结果
+    }
+    
+    /**
+     * 处理拉取安装所需镜像的请求
+     * 
+     * @param session WebSocket会话
+     * @param message WebSocket消息
+     */
+    private void handleInstallPullImage(WebSocketSession session, DockerWebSocketMessage message) {
+        // TODO: 实现拉取安装所需镜像的逻辑
+        // 1. 获取需要拉取的镜像
+        // 2. 开始拉取镜像
+        // 3. 实时返回拉取进度
+    }
+    
+    /**
+     * 处理验证安装参数的请求
+     * 
+     * @param session WebSocket会话
+     * @param message WebSocket消息
+     */
+    private void handleInstallValidate(WebSocketSession session, DockerWebSocketMessage message) {
+        // TODO: 实现验证安装参数的逻辑
+        // 1. 获取安装参数
+        // 2. 验证参数的有效性
+        // 3. 返回验证结果
+    }
+    
+    /**
+     * 处理开始安装的请求
+     * 
+     * @param session WebSocket会话
+     * @param message WebSocket消息
+     */
+    private void handleInstallStart(WebSocketSession session, DockerWebSocketMessage message) {
+        // TODO: 实现开始安装的逻辑
+        // 1. 获取安装配置
+        // 2. 开始安装流程
+        // 3. 实时返回安装进度和日志
+    }
+    
+    /**
      * 发送消息
      * 
      * @param session WebSocket会话
@@ -167,13 +240,41 @@ public class DockerWebSocketHandler extends TextWebSocketHandler {
      * 发送错误消息
      * 
      * @param session WebSocket会话
-     * @param error 错误信息
+     * @param errorMessage 错误信息
      */
-    private void sendErrorMessage(WebSocketSession session, String error) {
-        sendMessage(session, new DockerWebSocketMessage(
-            "ERROR",
-            UUID.randomUUID().toString(),
-            Map.of("error", error)
-        ));
+    private void sendErrorMessage(WebSocketSession session, String errorMessage) {
+        try {
+            DockerWebSocketMessage message = new DockerWebSocketMessage();
+            message.setType("ERROR");
+            message.setTaskId(UUID.randomUUID().toString());
+            message.setData(errorMessage);
+            session.sendMessage(new TextMessage(JSON.toJSONString(message)));
+        } catch (IOException e) {
+            log.error("发送错误消息失败", e);
+        }
+    }
+    
+    /**
+     * 安装会话信息
+     */
+    private static class InstallSession {
+        String sessionId;
+        String appId;
+        Map<String, Object> params;
+        List<String> logs;
+        InstallStatus status;
+    }
+    
+    /**
+     * 安装状态
+     */
+    private enum InstallStatus {
+        INITIALIZING,    // 初始化
+        CHECKING_IMAGES, // 检查镜像
+        PULLING_IMAGES,  // 拉取镜像
+        VALIDATING,      // 验证参数
+        INSTALLING,      // 安装中
+        COMPLETED,       // 完成
+        FAILED          // 失败
     }
 } 
