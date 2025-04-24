@@ -1,0 +1,120 @@
+<template>
+    <meta>
+        <name>媒体中心组合</name>
+        <description>部署 Transmission、Emby 和 Qbittorrent 媒体下载及播放服务</description>
+        <logo>https://pan.naspt.vip/d/naspt/emby%E5%9B%BE/MoviePoilt.jpg</logo>
+        <version>1.0.0</version>
+        <updated>2025-04-22</updated>
+        <author>yam</author>
+    </meta>
+
+    <fields>
+        <field>
+            <key>MP_PORT</key>
+            <label>MoviePoilt Web端口</label>
+            <default>9091</default>
+        </field>
+        <field>
+            <key>TR_PORT</key>
+            <label>Transmission Web端口</label>
+            <default>9091</default>
+        </field>
+        <field>
+            <key>EMBY_PORT</key>
+            <label>Emby Web端口</label>
+            <default>8096</default>
+        </field>
+        <field>
+            <key>QB_PORT</key>
+            <label>Qbittorrent Web端口</label>
+            <default>9000</default>
+        </field>
+        <field>
+            <key>DOCKER_HOME</key>
+            <label>docker文件运行目录配置</label>
+            <default>/volume1/docker</default>
+        </field>
+        <field>
+            <key>MEDIA_HOME</key>
+            <label>媒体资源存储目录</label>
+            <default>/volume1/media</default>
+        </field>
+    </fields>
+
+    <services>
+        <service name="naspt-tr">
+            <image>linuxserver/transmission:4.0.5</image>
+            <ports>
+                <port>${TR_PORT}:9091</port>
+            </ports>
+            <volumes>
+                <volume>${TR_CONFIG}:/config</volume>
+                <volume>${TR_DOWNLOAD}:/downloads</volume>
+            </volumes>
+            <restart>unless-stopped</restart>
+            <configUrl>
+                https://pan.naspt.vip/d/123pan/shell/tgz/naspt-tr.tgz
+            </configUrl>
+        </service>
+
+        <service name="naspt-emby">
+            <image>amilys/embyserver:beta</image>
+            <ports>
+                <port>${EMBY_PORT}:8096</port>
+            </ports>
+            <volumes>
+                <volume>${EMBY_CONFIG}:/config</volume>
+                <volume>${MEDIA_PATH}:/media</volume>
+            </volumes>
+            <restart>unless-stopped</restart>
+            <configUrl>
+                https://pan.naspt.vip/d/123pan/shell/tgz/naspt-emby.tgz
+            </configUrl>
+        </service>
+
+        <service name="naspt-qb">
+            <image>linuxserver/qbittorrent:4.6.4</image>
+            <ports>
+                <port>${QB_PORT}:8080</port>
+            </ports>
+            <volumes>
+                <volume>${QB_CONFIG}:/config</volume>
+                <volume>${QB_DOWNLOAD}:/downloads</volume>
+            </volumes>
+            <restart>unless-stopped</restart>
+            <configUrl>
+                https://pan.naspt.vip/d/123pan/shell/tgz/naspt-qb.tgz
+            </configUrl>
+        </service>
+        <service name="naspt-mpv2">
+            <image>jxxghp/moviepilot-v2:latest</image>
+            <ports>
+                <port>${MP_PORT}:3000</port>
+                <port>3001:3001</port>
+            </ports>
+            <env>
+                <var key="TZ">Asia/Shanghai</var>
+                <var key="SUPERUSER">admin</var>
+                <var key="API_TOKEN">nasptnasptnasptnasptnaspt</var>
+                <var key="AUTO_UPDATE_RESOURCE">false</var>
+                <var key="MOVIEPILOT_AUTO_UPDATE">false</var>
+                <var key="AUTH_SITE">icc2022,leaves</var>
+                <var key="ICC2022_UID">24730</var>
+                <var key="ICC2022_PASSKEY">49c421073514d4d981a0cbc4174f4b23</var>
+                <var key="LEAVES_UID">10971</var>
+                <var key="LEAVES_PASSKEY">e0405a9d0de9e3b112ef78ac3d9c7975</var>
+            </env>
+            <volumes>
+                <volume>${DOCKER_HOME}/config:/config</volume>
+                <volume>${MEDIA_HOME}:/media</volume>
+                <volume>${DOCKER_HOME}/core:/moviepilot/.cache/ms-playwright</volume>
+            </volumes>
+            <restart>always</restart>
+            <privileged>true</privileged>
+            <network>bridge</network>
+            <configUrl>
+                https://pan.naspt.vip/d/123pan/shell/tgz/naspt-qb.tgz
+            </configUrl>
+        </service>
+    </services>
+</template>

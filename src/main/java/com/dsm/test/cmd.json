@@ -1,0 +1,48 @@
+{
+  "Image": "{{IMAGE_NAME}}",
+  "Env": [
+    "MOVIEPILOT_AUTO_UPDATE=true",
+    "ICC2022_UID={{ICC2022_UID}}",
+    "SUPERUSER=admin",
+    "API_TOKEN=nasptnasptnasptnasptnaspt",
+    "AUTO_UPDATE_RESOURCE=true",
+    "LEAVES_UID=10971",
+    "LEAVES_PASSKEY=e0405a9d0de9e3b112ef78ac3d9c7975",
+    "TZ=Asia/Shanghai",
+    "AUTH_SITE=icc2022,leaves",
+    "ICC2022_PASSKEY=49c421073514d4d981a0cbc4174f4b23",
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.8",
+    "PYTHON_SHA256=c909157bb25ec114e5869124cc2a9c4a4d4c1e957ca4ff553f1edc692101154e",
+    "HOME=/moviepilot",
+    "CONFIG_DIR=/config",
+    "TERM=xterm",
+    "DISPLAY=:987",
+    "PUID=0",
+    "PGID=0",
+    "UMASK=022",
+    "PORT=3001",
+    "NGINX_PORT=3000",
+    "PROXY_HOST=http://naspt:naspt@10.10.10.2:7890"
+  ],
+  "ExposedPorts": {
+    "3000/tcp": "{}",
+    "3001/tcp": "{}"
+  },
+  "HostConfig": {
+    "PortBindings": {
+      "3000/tcp": "{{PORT}}",
+      "3001/tcp": "{{NGINX_PORT}}"
+    },
+    "Binds": [
+      "{{DOCKER_PATH}}/core:/moviepilot/.cache/ms-playwright",
+      "{{DOCKER_PATH}}/config:/config",
+      "{{MEDIA_PATH}}:/media"
+    ],
+    "Privileged": true,
+    "RestartPolicy": "{{RESTART_POLICY}}",
+    "NetworkMode": "bridge"
+  }
+}

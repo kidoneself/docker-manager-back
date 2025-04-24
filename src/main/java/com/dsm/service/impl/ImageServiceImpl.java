@@ -1,0 +1,1072 @@
+package com.dsm.service.impl;
+
+import com.dsm.api.DockerService;
+import com.dsm.config.AppConfig;
+import com.dsm.exception.BusinessException;
+import com.dsm.mapper.ImageStatusMapper;
+import com.dsm.pojo.dto.ImageStatusDTO;
+import com.dsm.pojo.dto.image.*;
+import com.dsm.pojo.entity.ImageStatus;
+import com.dsm.pojo.entity.OperationLog;
+import com.dsm.pojo.request.ImagePullRequestV2;
+import com.dsm.service.ImageService;
+import com.dsm.service.LogService;
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.GraphDriver;
+import com.github.dockerjava.api.command.InspectImageResponse;
+import com.github.dockerjava.api.command.RootFS;
+import com.github.dockerjava.api.model.ContainerConfig;
+import com.github.dockerjava.api.model.ExposedPort;
+import com.github.dockerjava.api.model.Image;
+import com.github.dockerjava.core.DockerClientBuilder;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.annotation.Resource;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+
+/**
+ * 容器服务实现类
+ * 实现容器管理的具体业务逻辑
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ImageServiceImpl implements ImageService {
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    // 存储镜像拉取任务和进度信息
+    private static final ConcurrentHashMap<String, Map<String, Object>> imagePullTasks = new ConcurrentHashMap<>();
+    private final DockerService dockerService;
+    private final LogService logService;
+    private final SimpMessagingTemplate messagingTemplate;
+    @Resource
+    ImageStatusMapper imageStatusMapper;
+    @Autowired
+    private AppConfig appConfig;
+
+    @Override
+    public String pullImage(ImagePullRequestV2 request) {
+        String image = request.getImage();
+        String tag = request.getTag();
+
+
+        if (image == null || image.isEmpty()) {
+            throw new BusinessException("image is empty");
+        }
+        try {
+            // 生成唯一任务ID
+            String taskId = UUID.randomUUID().toString();
+            // 初始化任务状态
+            Map<String, Object> taskInfo = new HashMap<>();
+            taskInfo.put("image", image);
+            taskInfo.put("tag", tag);
+            taskInfo.put("status", "pending");
+            taskInfo.put("progress", 0);
+            taskInfo.put("startTime", System.currentTimeMillis());
+            taskInfo.put("layers", new ArrayList<>());
+            taskInfo.put("completed", false);
+            taskInfo.put("message", "准备拉取镜像: " + image + ":" + tag);
+
+            // 保存任务信息
+            imagePullTasks.put(taskId, taskInfo);
+
+            // 记录操作日志
+            logService.addOperationLog(new OperationLog("拉取镜像", "admin", "开始拉取镜像: " + image + ":" + tag));
+
+            // 异步拉取镜像，使用线程池而不是直接创建线程
+            CompletableFuture.runAsync(() -> {
+                Thread.currentThread().setName("docker-pull-" + taskId);
+                try {
+                    log.info("开始拉取镜像: {}:{} (任务ID: {}", image, tag, taskId);
+                    // 更新任务状态
+                    updateTaskStatus(taskId, "running", 0, "正在拉取镜像...", false, false);
+
+                    // 调用Docker服务拉取镜像，并通过回调更新进度
+                    dockerService.pullImage(image, tag, progress -> handlePullProgress(taskId, progress));
+
+                    // 拉取完成后检查状态，确保任务被标记为完成
+                    Map<String, Object> finalTaskInfo = imagePullTasks.get(taskId);
+                    if (finalTaskInfo != null && !Boolean.TRUE.equals(finalTaskInfo.get("completed"))) {
+                        // 如果回调没有将任务标记为完成，可能是因为没有收到最终的完成事件
+                        updateTaskStatus(taskId, "success", 100, "镜像拉取成功", false, true);
+                    }
+
+                    log.info("镜像拉取成功: {}:{} (任务ID: {})", image, tag, taskId);
+                    logService.addOperationLog(new OperationLog("拉取镜像", "admin", "成功拉取镜像: " + image + ":" + tag));
+
+                    // 同步镜像信息到数据库
+                    try {
+                        Map<String, Object> syncResult = syncLocalImageToDb(image, tag);
+                        log.info("同步镜像信息到数据库成功: {}:{}, 结果: {}", image, tag, syncResult);
+                    } catch (Exception e) {
+                        log.warn("同步镜像信息到数据库失败: {}:{}, 错误: {}", image, tag, e.getMessage());
+                    }
+
+                    // 保留任务信息一段时间后清理
+                    Timer timer = new Timer();
+                    timer.schedule(new TimerTask() {
+                        @Override
+                        public void run() {
+                            imagePullTasks.remove(taskId);
+                            log.debug("已清理镜像拉取任务: {}", taskId);
+                        }
+                    }, 1000 * 60 * 30); // 30分钟后清理
+
+                } catch (Exception e) {
+                    log.error("拉取镜像失败 (任务ID: {}): {}", taskId, e.getMessage(), e);
+                    updateTaskStatus(taskId, "error", 0, "拉取镜像失败: " + e.getMessage(), true, false);
+                    logService.addOperationLog(new OperationLog("拉取镜像", "admin", "拉取失败: " + e.getMessage()));
+                }
+            });
+            // 返回任务ID
+            return taskId;
+        } catch (Exception e) {
+            throw new BusinessException("启动镜像拉取失败: " + e.getMessage());
+
+        }
+    }
+
+    @Override
+    public Map<String, Object> getPullProgress(String taskId) {
+        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
+        if (taskInfo == null) {
+            throw new BusinessException("镜像拉取任务不存在: " + taskId);
+        }
+        return taskInfo;
+    }
+
+    @Override
+    public Map<String, Object> cancelPullTask(String taskId) {
+        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
+
+        if (taskInfo == null) {
+            log.warn("找不到指定的拉取任务: {}", taskId);
+            throw new BusinessException("找不到指定的拉取任务");
+
+        }
+
+        // 尝试取消Docker操作（具体实现取决于Docker客户端库是否支持）
+        String image = (String) taskInfo.get("image");
+        String tag = (String) taskInfo.get("tag");
+
+        // 调用Docker服务取消拉取操作
+        dockerService.cancelPullImage(image + ":" + tag);
+
+        // 更新任务状态为已取消
+        updateTaskStatus(taskId, "canceled", 0, "用户取消了拉取任务", false, false);
+
+        logService.addOperationLog(new OperationLog("拉取镜像", "admin", "用户取消了拉取镜像: " + image + ":" + tag));
+
+        log.info("成功取消镜像拉取任务: {}", taskId);
+        return taskInfo;
+
+    }
+
+    @Override
+    @Transactional
+    public void removeImage(String imageId, boolean removeStatus) {
+        log.info("删除镜像: {}, 同时删除状态记录: {}", imageId, removeStatus);
+        try {
+            // 获取镜像详情
+            InspectImageResponse imageInfo = dockerService.getInspectImage(imageId);
+            String[] repoTags = imageInfo.getRepoTags().toArray(new String[0]);
+            // 删除Docker镜像
+            dockerService.removeImage(imageId);
+            // 如果需要同时删除状态记录
+            if (removeStatus) {
+                for (String repoTag : repoTags) {
+                    String[] parts = repoTag.split(":");
+                    if (parts.length >= 2) {
+                        String name = parts[0];
+                        String tag = parts[1];
+                        // 删除数据库记录
+                        imageStatusMapper.deleteByNameAndTag(name, tag);
+                        log.info("已删除镜像状态记录: {}:{}", name, tag);
+                    }
+                }
+            }
+            logService.addOperationLog(new OperationLog("删除镜像", "admin", "成功删除镜像: " + imageId + (removeStatus ? " (已删除状态记录)" : "")));
+        } catch (Exception e) {
+            log.error("删除镜像失败", e);
+            throw new RuntimeException("删除镜像失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 解析代理URL，提取用户名、密码、主机和端口
+     *
+     * @param proxyUrl 代理URL，格式如：http://username:password@host:port 或 http://host:port
+     * @return 包含代理信息的Map
+     */
+    private Map<String, String> parseProxyUrl(String proxyUrl) {
+        Map<String, String> result = new HashMap<>();
+        try {
+            URL url = new URL(proxyUrl);
+            String userInfo = url.getUserInfo();
+
+            // 设置主机和端口
+            result.put("host", url.getHost());
+            result.put("port", String.valueOf(url.getPort()));
+
+            // 如果有用户认证信息
+            if (userInfo != null && !userInfo.isEmpty()) {
+                String[] auth = userInfo.split(":");
+                if (auth.length == 2) {
+                    result.put("username", auth[0]);
+                    result.put("password", auth[1]);
+                }
+            }
+
+            log.info("解析代理URL: {}, 结果: {}", proxyUrl, result);
+            return result;
+        } catch (Exception e) {
+            log.error("解析代理URL失败: {}", e.getMessage());
+            throw new RuntimeException("解析代理URL失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, Long> testProxyLatency() {
+        Map<String, Long> result = new HashMap<>();
+        try {
+            String proxyUrl = appConfig.getProxyUrl();
+            Map<String, String> proxyInfo = parseProxyUrl(proxyUrl);
+
+            // 设置代理认证（只有当用户名和密码都存在时才设置）
+            if (proxyInfo.containsKey("username") && proxyInfo.containsKey("password")) {
+                Authenticator.setDefault(new Authenticator() {
+                    @Override
+                    protected PasswordAuthentication getPasswordAuthentication() {
+                        return new PasswordAuthentication(proxyInfo.get("username"), proxyInfo.get("password").toCharArray());
+                    }
+                });
+                log.info("已设置代理认证信息");
+            } else {
+                log.info("未设置代理认证信息，将使用无认证代理");
+            }
+
+            // 创建HTTP代理对象
+            Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyInfo.get("host"), Integer.parseInt(proxyInfo.get("port"))));
+
+            // 测试HTTP连接
+            long httpStartTime = System.currentTimeMillis();
+            URL httpUrl = new URL("http://registry-1.docker.io/v2/");
+            HttpURLConnection httpConnection = (HttpURLConnection) httpUrl.openConnection(proxy);
+            httpConnection.setConnectTimeout(5000);
+            httpConnection.setReadTimeout(5000);
+            httpConnection.connect();
+            int httpResponseCode = httpConnection.getResponseCode();
+            long httpResponseTime = System.currentTimeMillis() - httpStartTime;
+
+            // 测试HTTPS连接
+            long httpsStartTime = System.currentTimeMillis();
+            URL httpsUrl = new URL("https://registry-1.docker.io/v2/");
+            HttpURLConnection httpsConnection = (HttpURLConnection) httpsUrl.openConnection(proxy);
+            httpsConnection.setConnectTimeout(5000);
+            httpsConnection.setReadTimeout(5000);
+            httpsConnection.connect();
+            int httpsResponseCode = httpsConnection.getResponseCode();
+            long httpsResponseTime = System.currentTimeMillis() - httpsStartTime;
+
+            // 记录结果
+            result.put("httpConnectTime", httpResponseTime);
+            result.put("httpStatus", (long) httpResponseCode);
+            result.put("httpsConnectTime", httpsResponseTime);
+            result.put("httpsStatus", (long) httpsResponseCode);
+            result.put("totalTime", Math.max(httpResponseTime, httpsResponseTime));
+            // 根据延迟时间给出建议
+            long totalTime = result.get("totalTime");
+            String suggestion;
+            if (totalTime < 500) {
+                suggestion = "代理速度良好，建议使用代理";
+            } else if (totalTime < 1000) {
+                suggestion = "代理速度一般，可以使用代理";
+            } else if (totalTime < 2000) {
+                suggestion = "代理速度较慢，建议检查代理配置";
+            } else {
+                suggestion = "代理速度很慢，建议不使用代理";
+            }
+
+            // 添加建议到返回结果
+            result.put("suggestion", (long) suggestion.hashCode());
+            log.info("代理延迟测试结果: HTTP连接时间={}ms, HTTP状态码={}, HTTPS连接时间={}ms, HTTPS状态码={}", httpResponseTime, httpResponseCode, httpsResponseTime, httpsResponseCode);
+
+        } catch (Exception e) {
+            log.error("测试代理延迟失败: " + e.getMessage(), e);
+            result.put("error", 1L);
+            result.put("message", (long) e.getMessage().hashCode());
+        } finally {
+            // 清除代理认证
+            Authenticator.setDefault(null);
+        }
+        return result;
+    }
+
+    @Override
+    public List<ImageStatusDTO> listImageStatus() {
+        log.info("获取镜像状态列表");
+        try {
+            // 先同步宿主机镜像到数据库，确保显示最新数据
+            syncAllLocalImagesToDb();
+
+            // 获取所有本地镜像
+            List<Image> images = dockerService.listImages();
+
+            // 获取数据库中的所有镜像状态记录
+            List<ImageStatus> dbRecords = imageStatusMapper.selectAll();
+
+            // 构建数据库记录的映射表，键为"name:tag"
+            Map<String, ImageStatus> dbRecordsMap = dbRecords.stream().collect(Collectors.toMap(record -> record.getName() + ":" + record.getTag(), record -> record, (existing, replacement) -> existing // 如果有重复，保留第一个
+            ));
+
+            // 合并本地镜像和数据库记录
+            List<ImageStatusDTO> result = new ArrayList<>();
+
+            for (Image image : images) {
+                String[] repoTags = image.getRepoTags();
+                if (repoTags != null) {
+                    for (String repoTag : repoTags) {
+                        if (!"<none>:<none>".equals(repoTag)) {
+                            String[] parts = repoTag.split(":");
+                            String name = parts[0];
+                            String tag = parts.length > 1 ? parts[1] : "latest";
+
+                            ImageStatusDTO imageStatusDTO = ImageStatusDTO.builder().id(image.getId()).name(name).tag(tag).size(image.getSize()).created(new Date(image.getCreated() * 1000L)).build();
+
+                            // 添加状态信息
+                            ImageStatus statusRecord = dbRecordsMap.get(name + ":" + tag);
+                            if (statusRecord != null) {
+                                imageStatusDTO.setNeedUpdate(statusRecord.getNeedUpdate());
+                                imageStatusDTO.setStatusId(statusRecord.getId());
+                                imageStatusDTO.setLocalCreateTime(statusRecord.getLocalCreateTime());
+                                imageStatusDTO.setRemoteCreateTime(statusRecord.getRemoteCreateTime());
+
+                                // 将ISO格式日期字符串转换为Date对象
+                                String lastCheckedStr = statusRecord.getLastChecked();
+                                if (lastCheckedStr != null && !lastCheckedStr.isEmpty()) {
+                                    imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
+                                }
+                            }
+
+                            result.add(imageStatusDTO);
+                        }
+                    }
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.error("获取镜像状态列表失败: {}", e.getMessage(), e);
+            throw new RuntimeException("获取镜像状态列表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 每小时定时检查所有镜像更新状态
+     */
+    @Scheduled(fixedRate = 60 * 60 * 1000)
+    @Override
+    public void checkAllImagesStatus() {
+        log.info("开始定时检查所有镜像更新状态...");
+        try {
+            // 首先同步宿主机所有镜像到数据库
+            syncAllLocalImagesToDb();
+
+            // 然后查询所有镜像记录进行更新检查
+            List<ImageStatus> imageRecords = imageStatusMapper.selectAll();
+
+            log.info("找到 {} 条镜像记录需要检查", imageRecords.size());
+            for (ImageStatus record : imageRecords) {
+                try {
+                    log.info("=".repeat(100));
+                    String name = record.getName();
+                    String tag = record.getTag();
+                    String storedLocalCreateTime = record.getLocalCreateTime();
+                    Long id = record.getId();
+                    String remoteCreateTime = dockerService.getRemoteImageCreateTime(name, tag);
+                    Instant localInstant = Instant.parse(storedLocalCreateTime);
+                    Instant remoteInstant = Instant.parse(remoteCreateTime);
+
+                    log.info("通过HTTP获取到远程镜像创建时间: {}", remoteCreateTime);
+                    log.info("通过DOKCER取到本地镜像创建时间: {}", storedLocalCreateTime);
+                    // 如果远程时间晚于本地时间，说明需要更新
+                    boolean needUpdate = remoteInstant.isAfter(localInstant);
+                    // 更新数据库记录 - 使用ISO格式日期
+                    String currentTime = getCurrentIsoDateTime();
+                    imageStatusMapper.updateRemoteCreateTime(id, remoteCreateTime, needUpdate, currentTime);
+                    log.info("镜像 {}:{} 检查完成 - 需要更新: {}", name, tag, needUpdate);
+                } catch (Exception e) {
+                    log.error("检查镜像状态异常: {}:{}, 错误: {}", record.getName(), record.getTag(), e.getMessage());
+                }
+            }
+            log.info("所有镜像更新状态检查完成");
+        } catch (Exception e) {
+            log.error("检查镜像更新状态失败: {}", e.getMessage(), e);
+        }
+        log.info("=".repeat(100));
+
+    }
+
+    @Override
+    public Map<String, Object> updateImage(String imageName, String tag) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // 获取远程镜像创建时间
+            String remoteCreateTime = getRemoteImageCreateTime(imageName, tag);
+
+            // 拉取镜像
+            StringBuilder pullOutput = new StringBuilder();
+            Consumer<String> progressCallback = line -> {
+                pullOutput.append(line).append("\n");
+                log.debug("拉取进度: {}", line);
+            };
+
+            dockerService.pullImage(imageName, tag, progressCallback);
+
+            // 同步本地镜像信息到数据库
+            Map<String, Object> syncResult = syncLocalImageToDb(imageName, tag);
+
+            result.put("success", true);
+            result.put("message", "镜像更新成功");
+            result.put("remoteCreateTime", remoteCreateTime);
+            result.put("pull_output", pullOutput.toString());
+
+            return result;
+        } catch (Exception e) {
+            log.error("更新镜像失败", e);
+            result.put("success", false);
+            result.put("message", "更新镜像失败: " + e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
+    public List<ImageStatusDTO> listImages() {
+        log.info("获取镜像状态列表");
+        try {
+            // 先同步宿主机镜像到数据库，确保显示最新数据
+            syncAllLocalImagesToDb();
+
+            // 获取所有本地镜像
+            List<Image> images = dockerService.listImages();
+
+            // 获取数据库中的所有镜像状态记录
+            List<ImageStatus> dbRecords = imageStatusMapper.selectAll();
+
+            // 构建数据库记录的映射表，键为"name:tag"
+            Map<String, ImageStatus> dbRecordsMap = dbRecords.stream().collect(Collectors.toMap(record -> record.getName() + ":" + record.getTag(), record -> record, (existing, replacement) -> existing // 如果有重复，保留第一个
+            ));
+
+            // 合并本地镜像和数据库记录
+            List<ImageStatusDTO> result = new ArrayList<>();
+
+            for (Image image : images) {
+                String[] repoTags = image.getRepoTags();
+                if (repoTags != null) {
+                    for (String repoTag : repoTags) {
+                        if (!"<none>:<none>".equals(repoTag)) {
+                            String[] parts = repoTag.split(":");
+                            String name = parts[0];
+                            String tag = parts.length > 1 ? parts[1] : "latest";
+
+                            ImageStatusDTO imageStatusDTO = ImageStatusDTO.builder().id(image.getId()).name(name).tag(tag).size(image.getSize()).created(new Date(image.getCreated() * 1000L)).build();
+
+                            // 添加状态信息
+                            ImageStatus statusRecord = dbRecordsMap.get(name + ":" + tag);
+                            if (statusRecord != null) {
+                                imageStatusDTO.setNeedUpdate(statusRecord.getNeedUpdate());
+                                imageStatusDTO.setStatusId(statusRecord.getId());
+                                imageStatusDTO.setLocalCreateTime(statusRecord.getLocalCreateTime());
+                                imageStatusDTO.setRemoteCreateTime(statusRecord.getRemoteCreateTime());
+
+                                // 将ISO格式日期字符串转换为Date对象
+                                String lastCheckedStr = statusRecord.getLastChecked();
+                                if (lastCheckedStr != null && !lastCheckedStr.isEmpty()) {
+                                    imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
+                                }
+                            }
+
+                            result.add(imageStatusDTO);
+                        }
+                    }
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.error("获取镜像状态列表失败: {}", e.getMessage(), e);
+            throw new BusinessException("获取镜像状态列表失败");
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> syncLocalImageToDb(String imageName, String tag) {
+        log.info("同步特定镜像到数据库: {}:{}", imageName, tag);
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // 获取本地镜像创建时间
+            String localCreateTime = getLocalImageCreateTime(imageName, tag);
+            if (localCreateTime == null || localCreateTime.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "未找到本地镜像");
+                return result;
+            }
+
+            // 检查数据库是否已有记录
+            ImageStatus existingRecord = imageStatusMapper.selectByNameAndTag(imageName, tag);
+
+            // 当前ISO格式日期
+            String currentTime = getCurrentIsoDateTime();
+
+            if (existingRecord == null) {
+                // 插入新记录
+                ImageStatus imageStatus = ImageStatus.builder()
+                        .name(imageName)
+                        .tag(tag)
+                        .localCreateTime(localCreateTime)
+                        .remoteCreateTime(localCreateTime)
+                        .needUpdate(false)
+                        .lastChecked(currentTime)
+                        .build();
+
+                imageStatusMapper.insert(imageStatus);
+                log.info("已创建镜像状态记录: {}:{}", imageName, tag);
+            } else {
+                // 更新现有记录
+                existingRecord.setLocalCreateTime(localCreateTime);
+                existingRecord.setNeedUpdate(false);
+                existingRecord.setLastChecked(currentTime);
+                imageStatusMapper.update(existingRecord);
+                log.info("已更新镜像状态记录: {}:{}", imageName, tag);
+            }
+
+            result.put("success", true);
+            result.put("message", "成功同步镜像信息");
+            result.put("localCreateTime", localCreateTime);
+
+            return result;
+        } catch (Exception e) {
+            log.error("同步本地镜像到数据库失败: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "同步失败: " + e.getMessage());
+            return result;
+        }
+    }
+
+
+    /**
+     * 更新任务状态
+     *
+     * @param taskId      任务ID
+     * @param status      状态
+     * @param progress    进度
+     * @param message     消息
+     * @param isError     是否错误
+     * @param isCompleted 是否完成
+     */
+    private void updateTaskStatus(String taskId, String status, int progress, String message, boolean isError, boolean isCompleted) {
+        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
+        if (taskInfo != null) {
+            taskInfo.put("status", status);
+            taskInfo.put("progress", progress);
+            taskInfo.put("message", message);
+            taskInfo.put("isError", isError);
+            taskInfo.put("completed", isCompleted);
+            taskInfo.put("updateTime", System.currentTimeMillis());
+
+            // 发送WebSocket消息
+            sendPullProgressMessage(taskId, taskInfo);
+        }
+    }
+
+    /**
+     * 通过WebSocket发送进度消息
+     *
+     * @param taskId       任务ID
+     * @param progressData 进度数据
+     */
+    private void sendPullProgressMessage(String taskId, Map<String, Object> progressData) {
+        try {
+            // 创建一个副本，避免ConcurrentModificationException
+            Map<String, Object> dataCopy = new HashMap<>(progressData);
+
+            // 添加时间戳，确保每次消息都有变化
+            dataCopy.put("timestamp", System.currentTimeMillis());
+
+            // 发送到特定任务的WebSocket主题
+            messagingTemplate.convertAndSend("/topic/image/pull/" + taskId, dataCopy);
+
+            log.info("已发送进度消息: 任务={}, 进度={}%, 状态={}", taskId, dataCopy.get("progress"), dataCopy.get("status"));
+        } catch (Exception e) {
+            log.error("发送WebSocket消息失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 处理镜像拉取进度回调
+     *
+     * @param taskId   任务ID
+     * @param progress 进度信息
+     */
+    private void handlePullProgress(String taskId, String progress) {
+        if (progress == null || taskId == null) {
+            return;
+        }
+
+        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+
+        try {
+            log.info("收到拉取进度: taskId={}, progress={}", taskId, progress);
+
+            // 更新任务信息
+            taskInfo.put("message", progress);
+
+            // 计算进度
+            int currentProgress = 0;
+            if (progress.contains("Getting image source signatures")) {
+                currentProgress = 10;
+            } else if (progress.contains("Copying blob")) {
+                currentProgress = 30;
+            } else if (progress.contains("Copying config")) {
+                currentProgress = 70;
+            } else if (progress.contains("Writing manifest")) {
+                currentProgress = 90;
+            } else if (progress.contains("Storing signatures")) {
+                currentProgress = 100;
+            }
+
+            // 更新进度
+            taskInfo.put("progress", currentProgress);
+
+            // 检查是否完成
+            boolean isCompleted = progress.contains("Storing signatures");
+            if (isCompleted) {
+                taskInfo.put("completed", true);
+                taskInfo.put("status", "success");
+            }
+
+            // 发送进度消息
+            sendPullProgressMessage(taskId, taskInfo);
+
+        } catch (Exception e) {
+            log.error("处理拉取进度失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 同步宿主机所有镜像到数据库
+     * 保证数据库记录与宿主机镜像同步
+     */
+    public void syncAllLocalImagesToDb() {
+        log.info("开始同步宿主机所有镜像到数据库...");
+        try {
+            // 获取所有本地镜像
+            List<Image> images = dockerService.listImages();
+            int syncCount = 0;
+            int skipCount = 0;
+            for (Image image : images) {
+                String[] repoTags = image.getRepoTags();
+                if (repoTags != null) {
+                    for (String repoTag : repoTags) {
+                        // 跳过<none>:<none>这样的镜像
+                        if (!"<none>:<none>".equals(repoTag)) {
+                            String[] parts = repoTag.split(":");
+                            String name = parts[0];
+                            String tag = parts.length > 1 ? parts[1] : "latest";
+
+                            try {
+                                // 检查数据库是否已有记录
+                                ImageStatus existingRecord = imageStatusMapper.selectByNameAndTag(name, tag);
+
+                                // 获取本地镜像创建时间
+                                String localCreateTime = dockerService.getLocalImageCreateTime(name, tag);
+
+
+                                if (localCreateTime == null || localCreateTime.isEmpty()) {
+                                    log.warn("镜像 {}:{} 无法获取有效创建时间，跳过同步", name, tag);
+                                    skipCount++;
+                                    continue;
+                                }
+
+                                // 当前ISO格式日期
+                                String currentTime = getCurrentIsoDateTime();
+
+                                if (existingRecord == null) {
+                                    // 插入新记录
+                                    ImageStatus imageStatus = ImageStatus.builder()
+                                            .name(name)
+                                            .tag(tag)
+                                            .localCreateTime(localCreateTime)
+                                            .remoteCreateTime(localCreateTime) // 初始设置与本地相同，表示不需要更新
+                                            .needUpdate(false)
+                                            .lastChecked(currentTime)
+                                            .build();
+
+                                    imageStatusMapper.insert(imageStatus);
+                                    log.debug("已创建镜像状态记录: {}:{}", name, tag);
+                                    syncCount++;
+                                } else if (!localCreateTime.equals(existingRecord.getLocalCreateTime())) {
+                                    // 仅当创建时间不同时更新记录，避免不必要的数据库操作
+                                    existingRecord.setLocalCreateTime(localCreateTime);
+                                    existingRecord.setLastChecked(currentTime);
+                                    imageStatusMapper.update(existingRecord);
+                                    log.debug("已更新镜像状态记录: {}:{}", name, tag);
+                                    syncCount++;
+                                } else {
+                                    log.debug("镜像 {}:{} 无变化，跳过更新", name, tag);
+                                    skipCount++;
+                                }
+                            } catch (Exception e) {
+                                log.error("同步镜像 {}:{} 失败: {}", name, tag, e.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+
+            log.info("同步宿主机镜像完成 - 同步: {}, 跳过: {}", syncCount, skipCount);
+        } catch (Exception e) {
+            log.error("同步宿主机镜像失败: {}", e.getMessage(), e);
+        }
+    }
+
+
+    public String getRemoteImageCreateTime(String imageName, String tag) {
+        try {
+            List<String> command = new ArrayList<>();
+            command.add("skopeo");
+            command.add("inspect");
+            // 检查当前系统架构
+            String osName = System.getProperty("os.name").toLowerCase();
+            String osArch = System.getProperty("os.arch").toLowerCase();
+            // 只有在Mac的ARM架构(M系列芯片)上才需要指定架构参数
+            if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm64"))) {
+                log.info("检测到Mac ARM架构，强制指定arm64/linux架构参数");
+                command.add("--override-arch");
+                command.add("arm64");
+                command.add("--override-os");
+                command.add("linux");
+            }
+            // 添加 --insecure-policy 和 --tls-verify=false 参数
+            command.add("--insecure-policy");
+            command.add("--tls-verify=false");
+            command.add("docker://" + imageName + ":" + tag);
+
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            // 设置代理（如果启用）
+            String proxyUrl = appConfig.getProxyUrl();
+            boolean useProxy = proxyUrl != null && !proxyUrl.isEmpty();
+            if (useProxy) {
+
+                Map<String, String> env = processBuilder.environment();
+                env.put("HTTP_PROXY", proxyUrl);
+                env.put("HTTPS_PROXY", proxyUrl);
+            }
+
+            // 打印完整命令行
+            log.info("执行镜像检查命令: {}", String.join(" ", command));
+            Process process = processBuilder.start();
+
+            StringBuilder output = new StringBuilder();
+            StringBuilder errorOutput = new StringBuilder();
+
+            // 读取标准输出
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            // 读取错误输出
+            try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+                String line;
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append("\n");
+                }
+            }
+
+            // 等待命令完成，最多等待30秒
+            boolean completed = process.waitFor(30, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                throw new RuntimeException("获取远程镜像创建时间超时");
+            }
+
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                log.error("skopeo命令执行失败，退出码: {}, 错误输出: {}", exitCode, errorOutput);
+                throw new RuntimeException("获取远程镜像创建时间失败，退出码: " + exitCode + ", 错误输出: " + errorOutput);
+            }
+
+            // 解析JSON输出以提取创建时间
+            String outputStr = output.toString();
+            int createTimeIndex = outputStr.indexOf("\"Created\":");
+            if (createTimeIndex >= 0) {
+                int startPos = outputStr.indexOf("\"", createTimeIndex + 10) + 1;
+                int endPos = outputStr.indexOf("\"", startPos);
+                if (startPos > 0 && endPos > startPos) {
+                    String createTime = outputStr.substring(startPos, endPos);
+                    return createTime;
+                }
+            }
+            throw new RuntimeException("无法从输出中解析镜像创建时间");
+        } catch (Exception e) {
+            log.error("获取远程镜像创建时间失败: {}", e.getMessage(), e);
+            throw new RuntimeException("获取远程镜像创建时间失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 将ISO8601格式的日期字符串转换为Date对象
+     *
+     * @param isoDateString ISO格式的日期字符串
+     * @return Date对象
+     */
+    private Date parseIsoDate(String isoDateString) {
+        if (isoDateString == null || isoDateString.isEmpty()) {
+            return null;
+        }
+        try {
+            LocalDateTime localDateTime = LocalDateTime.parse(isoDateString, ISO_FORMATTER);
+            return Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant());
+        } catch (Exception e) {
+            log.warn("解析ISO日期失败: {}", isoDateString);
+            return null;
+        }
+    }
+
+    public String getLocalImageCreateTime(String imageName, String tag) {
+        log.info("获取本地镜像创建时间: {}:{}", imageName, tag);
+        try {
+            // 找到镜像
+            List<Image> images = dockerService.listImages();
+            String fullName = imageName + ":" + tag;
+
+            Optional<Image> targetImage = images.stream().filter(image -> image.getRepoTags() != null && Arrays.asList(image.getRepoTags()).contains(fullName)).findFirst();
+
+            if (!targetImage.isPresent()) {
+                log.warn("未找到本地镜像: {}", fullName);
+                return null;
+            }
+
+            // 获取镜像详情
+            InspectImageResponse imageInfo = dockerService.getInspectImage(targetImage.get().getId());
+            String createTime = imageInfo.getCreated();
+
+            // 如果创建时间包含 "T"，则使用该值作为创建时间
+            if (createTime != null && !createTime.isEmpty()) {
+                log.info("获取到本地镜像创建时间: {}", createTime);
+                return createTime;
+            }
+
+            log.warn("无法从镜像中提取有效创建时间");
+            return null;
+        } catch (Exception e) {
+            log.error("获取本地镜像创建时间失败", e);
+            throw new RuntimeException("获取本地镜像创建时间失败: " + e.getMessage());
+        }
+    }
+
+
+    // 获取本地镜像的 CreateTime（Docker API）
+    public String getDockerApiCreateTime(String imageName) {
+        DockerClient dockerClient = DockerClientBuilder.getInstance().build();
+        List<Image> images = dockerClient.listImagesCmd().exec();
+
+        String targetRepo = imageName.split(":")[0];
+        for (Image image : images) {
+            String[] repoDigests = image.getRepoDigests();
+            if (repoDigests != null) {
+                for (String digest : repoDigests) {
+                    if (digest.startsWith(targetRepo + "@")) {
+                        return digest.split("@")[1]; // 返回 T
+                    }
+                }
+            }
+        }
+        return "❌ 未找到本地镜像（或无 createTime）";
+    }
+
+
+    private String getCurrentIsoDateTime() {
+        return LocalDateTime.now().format(ISO_FORMATTER);
+    }
+
+    @Override
+    public ImageInspectDTO getImageDetail(String imageName) {
+        try {
+            InspectImageResponse response = dockerService.getInspectImage(imageName);
+            if (response == null) {
+                throw new RuntimeException("未找到镜像: " + imageName);
+            }
+
+            ImageInspectDTO imageInspectDTO = new ImageInspectDTO();
+            imageInspectDTO.setId(response.getId());
+            imageInspectDTO.setParent(response.getParent());
+            imageInspectDTO.setComment(response.getComment());
+            // 解析ISO 8601格式的日期字符串
+            String createdStr = response.getCreated();
+            if (createdStr != null && !createdStr.isEmpty()) {
+                try {
+                    LocalDateTime localDateTime = LocalDateTime.parse(createdStr, DateTimeFormatter.ISO_DATE_TIME);
+                    imageInspectDTO.setCreated(Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant()));
+                } catch (Exception e) {
+                    log.warn("解析创建时间失败: {}, 使用当前时间", createdStr);
+                    imageInspectDTO.setCreated(new Date());
+                }
+            } else {
+                imageInspectDTO.setCreated(new Date());
+            }
+            imageInspectDTO.setContainer(response.getContainer());
+            imageInspectDTO.setDockerVersion(response.getDockerVersion());
+            imageInspectDTO.setAuthor(response.getAuthor());
+            imageInspectDTO.setOs(response.getOs());
+            imageInspectDTO.setOsVersion(response.getOsVersion());
+            imageInspectDTO.setSize(response.getSize());
+            imageInspectDTO.setVirtualSize(response.getVirtualSize());
+            imageInspectDTO.setRepoDigests(response.getRepoDigests());
+            imageInspectDTO.setRepoTags(response.getRepoTags());
+
+            // 设置ContainerConfig
+            ContainerConfig containerConfig = response.getContainerConfig();
+            if (containerConfig != null) {
+                ContainerConfigDTO containerConfigDTO = new ContainerConfigDTO();
+                containerConfigDTO.setUser(containerConfig.getUser());
+                containerConfigDTO.setAttachStdin(containerConfig.getAttachStdin());
+                containerConfigDTO.setAttachStdout(containerConfig.getAttachStdout());
+                containerConfigDTO.setAttachStderr(containerConfig.getAttachStderr());
+                containerConfigDTO.setTty(containerConfig.getTty());
+                containerConfigDTO.setEnv(containerConfig.getEnv() != null ? Arrays.asList(containerConfig.getEnv()) : null);
+                containerConfigDTO.setCmd(containerConfig.getCmd() != null ? Arrays.asList(containerConfig.getCmd()) : null);
+                containerConfigDTO.setEntrypoint(containerConfig.getEntrypoint() != null ? Arrays.asList(containerConfig.getEntrypoint()) : null);
+                containerConfigDTO.setImage(containerConfig.getImage());
+                containerConfigDTO.setLabels(containerConfig.getLabels());
+                containerConfigDTO.setVolumes(containerConfig.getVolumes());
+                containerConfigDTO.setWorkingDir(containerConfig.getWorkingDir());
+                containerConfigDTO.setOnBuild(containerConfig.getOnBuild() != null ? Arrays.asList(containerConfig.getOnBuild()) : null);
+
+                // 处理暴露的端口
+                ExposedPort[] exposedPorts = containerConfig.getExposedPorts();
+                if (exposedPorts != null) {
+                    Map<String, Object> portsMap = new HashMap<>();
+                    for (ExposedPort port : exposedPorts) {
+                        if (port != null) {
+                            String portStr = port.getPort() + "/" + port.getProtocol().name().toLowerCase();
+                            portsMap.put(portStr, new HashMap<>());
+                        }
+                    }
+                    containerConfigDTO.setExposedPorts(portsMap);
+                } else {
+                    containerConfigDTO.setExposedPorts(new HashMap<>());
+                }
+
+                // 设置健康检查
+                if (containerConfig.getHealthcheck() != null) {
+                    HealthcheckDTO healthcheckDTO = new HealthcheckDTO();
+                    healthcheckDTO.setTest(containerConfig.getHealthcheck().getTest());
+                    healthcheckDTO.setInterval(containerConfig.getHealthcheck().getInterval());
+                    healthcheckDTO.setTimeout(containerConfig.getHealthcheck().getTimeout());
+                    healthcheckDTO.setRetries(containerConfig.getHealthcheck().getRetries());
+                    healthcheckDTO.setStartPeriod(containerConfig.getHealthcheck().getStartPeriod());
+                    containerConfigDTO.setHealthcheck(healthcheckDTO);
+                }
+
+                imageInspectDTO.setContainerConfig(containerConfigDTO);
+            }
+
+            // 设置Config
+            ContainerConfig config = response.getConfig();
+            if (config != null) {
+                ConfigDTO configDTO = new ConfigDTO();
+                configDTO.setUser(config.getUser());
+                configDTO.setAttachStdin(config.getAttachStdin());
+                configDTO.setAttachStdout(config.getAttachStdout());
+                configDTO.setAttachStderr(config.getAttachStderr());
+                configDTO.setTty(config.getTty());
+                configDTO.setEnv(config.getEnv() != null ? Arrays.asList(config.getEnv()) : null);
+                configDTO.setCmd(config.getCmd() != null ? Arrays.asList(config.getCmd()) : null);
+                configDTO.setEntrypoint(config.getEntrypoint() != null ? Arrays.asList(config.getEntrypoint()) : null);
+                configDTO.setImage(config.getImage());
+                configDTO.setLabels(config.getLabels());
+                configDTO.setVolumes(config.getVolumes());
+                configDTO.setWorkingDir(config.getWorkingDir());
+                configDTO.setOnBuild(config.getOnBuild() != null ? config.getOnBuild().toString() : null);
+
+                // 处理暴露的端口
+                ExposedPort[] exposedPorts = config.getExposedPorts();
+                if (exposedPorts != null) {
+                    Map<String, Object> portsMap = new HashMap<>();
+                    for (ExposedPort port : exposedPorts) {
+                        if (port != null) {
+                            String portStr = port.getPort() + "/" + port.getProtocol().name().toLowerCase();
+                            portsMap.put(portStr, new HashMap<>());
+                        }
+                    }
+                    configDTO.setExposedPorts(portsMap);
+                } else {
+                    configDTO.setExposedPorts(new HashMap<>());
+                }
+
+                // 设置健康检查
+                if (config.getHealthcheck() != null) {
+                    HealthcheckDTO healthcheckDTO = new HealthcheckDTO();
+                    healthcheckDTO.setTest(config.getHealthcheck().getTest());
+                    healthcheckDTO.setInterval(config.getHealthcheck().getInterval());
+                    healthcheckDTO.setTimeout(config.getHealthcheck().getTimeout());
+                    healthcheckDTO.setRetries(config.getHealthcheck().getRetries());
+                    healthcheckDTO.setStartPeriod(config.getHealthcheck().getStartPeriod());
+                    configDTO.setHealthcheck(healthcheckDTO);
+                }
+
+                imageInspectDTO.setConfig(configDTO);
+            }
+
+            // 设置GraphDriver
+            GraphDriver graphDriver = response.getGraphDriver();
+            if (graphDriver != null) {
+                GraphDriverDTO graphDriverDTO = new GraphDriverDTO();
+                graphDriverDTO.setName(graphDriver.getName());
+//                graphDriverDTO.setData(graphDriver.getData() != null ? graphDriver.getData() : new HashMap<>());
+                imageInspectDTO.setGraphDriver(graphDriverDTO);
+            }
+
+            // 设置RootFS
+            RootFS rootFS = response.getRootFS();
+            if (rootFS != null) {
+                RootFSDTO rootFSDTO = new RootFSDTO();
+                rootFSDTO.setType(rootFS.getType());
+                rootFSDTO.setLayers(rootFS.getLayers() != null ? rootFS.getLayers() : null);
+                imageInspectDTO.setRootFS(rootFSDTO);
+            }
+
+            return imageInspectDTO;
+        } catch (Exception e) {
+            log.error("获取镜像详情失败: {}", e.getMessage(), e);
+            throw new RuntimeException("获取镜像详情失败: " + e.getMessage());
+        }
+    }
+}
