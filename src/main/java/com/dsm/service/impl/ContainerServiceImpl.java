@@ -217,7 +217,6 @@ public class ContainerServiceImpl implements ContainerService {
     @Override
     public String createContainer(ContainerCreateRequest request) {
         try {
-
             // 1. 检查镜像是否存在，并获取镜像信息
             String imageName = request.getImage();
             InspectImageResponse imageInfo = null;
@@ -235,21 +234,21 @@ public class ContainerServiceImpl implements ContainerService {
                 // 对于未映射的卷，记录警告
                 containerVolumes.stream().filter(vol -> !mappedVolumes.contains(vol)).forEach(vol -> log.warn("镜像定义的卷 {} 未被映射到主机", vol));
             }
-            //暂时不实现
-//            if (imageInfo == null || request.isAutoPull()) {
-//                // 自动拉取镜像
-//                ImagePullRequestV2 imagePullRequest = new ImagePullRequestV2();
-//                imagePullRequest.setImage(request.getImage());
-//                imagePullRequest.setTag(request.getTag());
-//                imageService.pullImage(imagePullRequest);
-//
-//                // 再次获取镜像信息
-//                try {
-//                    imageInfo = dockerService.getInspectImage(imageName);
-//                } catch (Exception e) {
-//                    throw new RuntimeException("镜像拉取后仍无法获取信息: " + e.getMessage());
-//                }
-//            }
+            // FIXME: 功能尚未完成，暂不启用
+/*            if (imageInfo == null || request.isAutoPull()) {
+                // 自动拉取镜像
+                ImagePullRequestV2 imagePullRequest = new ImagePullRequestV2();
+                imagePullRequest.setImage(request.getImage());
+                imagePullRequest.setTag(request.getTag());
+                imageService.pullImage(imagePullRequest);
+
+                // 再次获取镜像信息
+                try {
+                    imageInfo = dockerService.getInspectImage(imageName);
+                } catch (Exception e) {
+                    throw new RuntimeException("镜像拉取后仍无法获取信息: " + e.getMessage());
+                }
+            }*/
             CreateContainerResponse createContainerResponse = dockerService.configureContainerCmd(request);
             String containerId = createContainerResponse.getId();
             dockerService.startContainer(containerId);
