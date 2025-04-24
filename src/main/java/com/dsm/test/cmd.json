@@ -1,48 +1,38 @@
 {
-  "Image": "{{IMAGE_NAME}}",
+  "Image": "ccr.ccs.tencentyun.com/naspt/qbittorrent:4.6.4",
   "Env": [
-    "MOVIEPILOT_AUTO_UPDATE=true",
-    "ICC2022_UID={{ICC2022_UID}}",
-    "SUPERUSER=admin",
-    "API_TOKEN=nasptnasptnasptnasptnaspt",
-    "AUTO_UPDATE_RESOURCE=true",
-    "LEAVES_UID=10971",
-    "LEAVES_PASSKEY=e0405a9d0de9e3b112ef78ac3d9c7975",
+    "UMASK=022",
     "TZ=Asia/Shanghai",
-    "AUTH_SITE=icc2022,leaves",
-    "ICC2022_PASSKEY=49c421073514d4d981a0cbc4174f4b23",
-    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "LANG=C.UTF-8",
-    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
-    "PYTHON_VERSION=3.12.8",
-    "PYTHON_SHA256=c909157bb25ec114e5869124cc2a9c4a4d4c1e957ca4ff553f1edc692101154e",
-    "HOME=/moviepilot",
-    "CONFIG_DIR=/config",
-    "TERM=xterm",
-    "DISPLAY=:987",
+    "SavePatch=/media/downloads",
+    "TempPatch=/media/downloads",
+    "WEBUI_PORT=9000",
     "PUID=0",
     "PGID=0",
-    "UMASK=022",
-    "PORT=3001",
-    "NGINX_PORT=3000",
-    "PROXY_HOST=http://naspt:naspt@10.10.10.2:7890"
+    "PATH=/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PS1=$(whoami)@$(hostname):$(pwd)\\$ ",
+    "HOME=/config",
+    "TERM=xterm",
+    "S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0",
+    "S6_VERBOSITY=1",
+    "S6_STAGE2_HOOK=/docker-mods",
+    "VIRTUAL_ENV=/lsiopy",
+    "LSIO_FIRST_PARTY=true",
+    "XDG_CONFIG_HOME=/config",
+    "XDG_DATA_HOME=/config"
   ],
   "ExposedPorts": {
-    "3000/tcp": "{}",
-    "3001/tcp": "{}"
+    "9000/tcp": "{}"
   },
   "HostConfig": {
     "PortBindings": {
-      "3000/tcp": "{{PORT}}",
-      "3001/tcp": "{{NGINX_PORT}}"
+      "9000/tcp": "9000"
     },
     "Binds": [
-      "{{DOCKER_PATH}}/core:/moviepilot/.cache/ms-playwright",
-      "{{DOCKER_PATH}}/config:/config",
-      "{{MEDIA_PATH}}:/media"
+      "/volume1/media:/media",
+      "/volume1/docker/naspt-qb/config:/config"
     ],
-    "Privileged": true,
-    "RestartPolicy": "{{RESTART_POLICY}}",
+    "Privileged": false,
+    "RestartPolicy": "always",
     "NetworkMode": "bridge"
   }
 }

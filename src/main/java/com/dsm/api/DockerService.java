@@ -4,6 +4,7 @@ import com.dsm.config.AppConfig;
 import com.dsm.exception.BusinessException;
 import com.dsm.pojo.request.ContainerCreateRequest;
 import com.dsm.utils.DockerComposeUtils;
+import com.dsm.websocket.callback.PullImageCallback;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.*;
 import com.github.dockerjava.api.model.*;
@@ -22,10 +23,8 @@ import java.io.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -314,12 +313,11 @@ public class DockerService {
     /**
      * 使用skopeo从远程仓库拉取镜像到宿主机Docker
      *
-     * @param image            镜像名称
-     * @param tag              镜像标签
-     * @param useProxy         是否使用代理
-     * @param progressCallback 进度回调函数
+     * @param image    镜像名称
+     * @param tag      镜像标签
+     * @param callback 进度回调
      */
-    public void pullImageWithSkopeo(String image, String tag, Consumer<String> progressCallback) {
+    public void pullImageWithSkopeo(String image, String tag, PullImageCallback callback) {
         log.info("开始使用 skopeo 拉取镜像: {}:{} ", image, tag);
         try {
             // 构建完整的镜像名称
@@ -349,48 +347,70 @@ public class DockerService {
             String proxyUrl = appConfig.getProxyUrl();
             boolean isProxy = proxyUrl != null && !proxyUrl.isEmpty();
             if (isProxy) {
-                System.out.println("当前代理为：" + proxyUrl);
+//                System.out.println("当前代理为：" + proxyUrl);
                 processBuilder.redirectErrorStream(true);
                 processBuilder.environment().put("HTTP_PROXY", proxyUrl);
                 processBuilder.environment().put("HTTPS_PROXY", proxyUrl);
             }
             processBuilder.redirectErrorStream(true);
             // 打印完整命令行
-            log.info("执行命令: {}", String.join(" ", command));
+            log.info("执行命令: {},是否使用代理 {}", String.join(" ", command), isProxy);
             Process process = processBuilder.start();
             // 读取输出
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
+                int progress = 0;
                 while ((line = reader.readLine()) != null) {
                     log.info("skopeo: {}", line);
-                    if (progressCallback != null) {
-                        progressCallback.accept(line);
+                    if (callback != null) {
+                        // 解析进度
+                        if (line.contains("Getting image source signatures")) {
+                            progress = 10;
+                        } else if (line.contains("Copying blob")) {
+                            progress = 30;
+                        } else if (line.contains("Copying config")) {
+                            progress = 70;
+                        } else if (line.contains("Writing manifest")) {
+                            progress = 90;
+                        } else if (line.contains("Storing signatures")) {
+                            progress = 100;
+                        }
+                        callback.onProgress(progress, line);
                     }
                 }
             }
             // 等待命令完成
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                throw new RuntimeException("skopeo 命令执行失败，退出码: " + exitCode);
+                String error = "skopeo 命令执行失败，退出码: " + exitCode;
+                if (callback != null) {
+                    callback.onError(error);
+                }
+                throw new RuntimeException(error);
             }
             log.info("镜像拉取完成: {}", fullImageName);
+            if (callback != null) {
+                callback.onComplete();
+            }
         } catch (Exception e) {
             log.error("使用 skopeo 拉取镜像失败: {}", e.getMessage(), e);
+            if (callback != null) {
+                callback.onError(e.getMessage());
+            }
             throw new RuntimeException("使用 skopeo 拉取镜像失败: " + e.getMessage());
         }
     }
 
     /**
-     * 拉取Docker镜像
+     * 拉取Docker镜像（支持WebSocket回调）
      *
-     * @param image            镜像名称
-     * @param tag              镜像标签
-     * @param useProxy         是否使用代理
-     * @param progressCallback 进度回调函数
+     * @param image    镜像名称
+     * @param tag      镜像标签
+     * @param callback 进度回调
      */
-    public void pullImage(String image, String tag, Consumer<String> progressCallback) {
+    public void pullImage(String image, String tag, PullImageCallback callback) {
         // 使用 skopeo 替代原来的实现
-        pullImageWithSkopeo(image, tag, progressCallback);
+        pullImageWithSkopeo(image, tag, callback);
     }
 
     /**
@@ -460,7 +480,6 @@ public class DockerService {
     /**
      * 获取镜像详细信息
      *
-     * @param imageId 镜像ID
      * @return 镜像详细信息
      */
     public InspectContainerResponse inspectContainerCmd(String containerId) {
@@ -674,7 +693,6 @@ public class DockerService {
     }
 
 
-
     /**
      * 配置容器创建命令
      *
@@ -817,21 +835,21 @@ public class DockerService {
             try {
                 // 拉取镜像
                 dockerClient.pullImageCmd(config.getImage()).start().awaitCompletion();
-                
+
                 // 创建容器
                 CreateContainerResponse container = dockerClient.createContainerCmd(config.getImage())
                         .withName(config.getContainerName())
                         .withPortBindings(config.getPortBindings().toArray(new PortBinding[0]))
                         .withVolumes(config.getVolumes().toArray(new Volume[0]))
                         .exec();
-                
+
                 // 启动容器
                 dockerClient.startContainerCmd(container.getId()).exec();
-                
+
                 log.info("Service {} (Container {}) started successfully", serviceName, config.getContainerName());
             } catch (Exception e) {
-                log.error("Error starting service {} (Container {}): {}", 
-                    serviceName, config.getContainerName(), e.getMessage());
+                log.error("Error starting service {} (Container {}): {}",
+                        serviceName, config.getContainerName(), e.getMessage());
                 throw new RuntimeException("Failed to start service " + serviceName, e);
             }
         }
@@ -841,7 +859,7 @@ public class DockerService {
      * 执行Docker Compose文件（带环境变量文件）
      *
      * @param composeFilePath Docker Compose文件路径
-     * @param envFilePath 环境变量文件路径
+     * @param envFilePath     环境变量文件路径
      * @throws FileNotFoundException 如果文件不存在
      */
     public void executeDockerCompose(String composeFilePath, String envFilePath) throws FileNotFoundException {

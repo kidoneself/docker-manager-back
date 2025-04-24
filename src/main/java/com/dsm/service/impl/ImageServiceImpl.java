@@ -11,6 +11,7 @@ import com.dsm.pojo.entity.OperationLog;
 import com.dsm.pojo.request.ImagePullRequestV2;
 import com.dsm.service.ImageService;
 import com.dsm.service.LogService;
+import com.dsm.websocket.callback.PullImageCallback;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.GraphDriver;
 import com.github.dockerjava.api.command.InspectImageResponse;
@@ -22,7 +23,7 @@ import com.github.dockerjava.core.DockerClientBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+//import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,7 +57,7 @@ public class ImageServiceImpl implements ImageService {
     private static final ConcurrentHashMap<String, Map<String, Object>> imagePullTasks = new ConcurrentHashMap<>();
     private final DockerService dockerService;
     private final LogService logService;
-    private final SimpMessagingTemplate messagingTemplate;
+//    private final SimpMessagingTemplate messagingTemplate;
     @Resource
     ImageStatusMapper imageStatusMapper;
     @Autowired
@@ -66,82 +67,66 @@ public class ImageServiceImpl implements ImageService {
     public String pullImage(ImagePullRequestV2 request) {
         String image = request.getImage();
         String tag = request.getTag();
-
+        String taskId = UUID.randomUUID().toString();
 
         if (image == null || image.isEmpty()) {
             throw new BusinessException("image is empty");
         }
-        try {
-            // 生成唯一任务ID
-            String taskId = UUID.randomUUID().toString();
-            // 初始化任务状态
-            Map<String, Object> taskInfo = new HashMap<>();
-            taskInfo.put("image", image);
-            taskInfo.put("tag", tag);
-            taskInfo.put("status", "pending");
-            taskInfo.put("progress", 0);
-            taskInfo.put("startTime", System.currentTimeMillis());
-            taskInfo.put("layers", new ArrayList<>());
-            taskInfo.put("completed", false);
-            taskInfo.put("message", "准备拉取镜像: " + image + ":" + tag);
 
-            // 保存任务信息
-            imagePullTasks.put(taskId, taskInfo);
+        // 创建任务信息
+        Map<String, Object> taskInfo = new HashMap<>();
+        taskInfo.put("image", image);
+        taskInfo.put("tag", tag);
+        taskInfo.put("status", "pending");
+        taskInfo.put("progress", 0);
+        taskInfo.put("message", "等待开始");
+        taskInfo.put("completed", false);
+        taskInfo.put("error", false);
+        imagePullTasks.put(taskId, taskInfo);
 
-            // 记录操作日志
-            logService.addOperationLog(new OperationLog("拉取镜像", "admin", "开始拉取镜像: " + image + ":" + tag));
-
-            // 异步拉取镜像，使用线程池而不是直接创建线程
-            CompletableFuture.runAsync(() -> {
-                Thread.currentThread().setName("docker-pull-" + taskId);
-                try {
-                    log.info("开始拉取镜像: {}:{} (任务ID: {}", image, tag, taskId);
-                    // 更新任务状态
-                    updateTaskStatus(taskId, "running", 0, "正在拉取镜像...", false, false);
-
-                    // 调用Docker服务拉取镜像，并通过回调更新进度
-                    dockerService.pullImage(image, tag, progress -> handlePullProgress(taskId, progress));
-
-                    // 拉取完成后检查状态，确保任务被标记为完成
-                    Map<String, Object> finalTaskInfo = imagePullTasks.get(taskId);
-                    if (finalTaskInfo != null && !Boolean.TRUE.equals(finalTaskInfo.get("completed"))) {
-                        // 如果回调没有将任务标记为完成，可能是因为没有收到最终的完成事件
+        // 异步执行拉取操作
+        CompletableFuture.runAsync(() -> {
+            Thread.currentThread().setName("docker-pull-" + taskId);
+            try {
+                log.info("开始拉取镜像: {}:{} (任务ID: {})", image, tag, taskId);
+                
+                // 使用DockerService的pullImage方法，通过回调更新进度
+                dockerService.pullImage(image, tag, new PullImageCallback() {
+                    @Override
+                    public void onProgress(int progress, String status) {
+                        updateTaskStatus(taskId, "running", progress, status, false, false);
+                    }
+                    
+                    @Override
+                    public void onComplete() {
                         updateTaskStatus(taskId, "success", 100, "镜像拉取成功", false, true);
-                    }
-
-                    log.info("镜像拉取成功: {}:{} (任务ID: {})", image, tag, taskId);
-                    logService.addOperationLog(new OperationLog("拉取镜像", "admin", "成功拉取镜像: " + image + ":" + tag));
-
-                    // 同步镜像信息到数据库
-                    try {
-                        Map<String, Object> syncResult = syncLocalImageToDb(image, tag);
-                        log.info("同步镜像信息到数据库成功: {}:{}, 结果: {}", image, tag, syncResult);
-                    } catch (Exception e) {
-                        log.warn("同步镜像信息到数据库失败: {}:{}, 错误: {}", image, tag, e.getMessage());
-                    }
-
-                    // 保留任务信息一段时间后清理
-                    Timer timer = new Timer();
-                    timer.schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            imagePullTasks.remove(taskId);
-                            log.debug("已清理镜像拉取任务: {}", taskId);
+                        log.info("镜像拉取成功: {}:{} (任务ID: {})", image, tag, taskId);
+                        logService.addOperationLog(new OperationLog("拉取镜像", "admin", "成功拉取镜像: " + image + ":" + tag));
+                        
+                        // 同步镜像信息到数据库
+                        try {
+                            Map<String, Object> syncResult = syncLocalImageToDb(image, tag);
+                            log.info("同步镜像信息到数据库成功: {}:{}, 结果: {}", image, tag, syncResult);
+                        } catch (Exception e) {
+                            log.warn("同步镜像信息到数据库失败: {}:{}, 错误: {}", image, tag, e.getMessage());
                         }
-                    }, 1000 * 60 * 30); // 30分钟后清理
+                    }
+                    
+                    @Override
+                    public void onError(String error) {
+                        updateTaskStatus(taskId, "failed", 0, error, true, true);
+                        log.error("镜像拉取失败: {}:{} (任务ID: {}), 错误: {}", image, tag, taskId, error);
+                        logService.addOperationLog(new OperationLog("拉取镜像", "admin", "拉取镜像失败: " + image + ":" + tag + ", 错误: " + error));
+                    }
+                });
+            } catch (Exception e) {
+                updateTaskStatus(taskId, "failed", 0, e.getMessage(), true, true);
+                log.error("镜像拉取失败: {}:{} (任务ID: {}), 错误: {}", image, tag, taskId, e.getMessage());
+                logService.addOperationLog(new OperationLog("拉取镜像", "admin", "拉取镜像失败: " + image + ":" + tag + ", 错误: " + e.getMessage()));
+            }
+        });
 
-                } catch (Exception e) {
-                    log.error("拉取镜像失败 (任务ID: {}): {}", taskId, e.getMessage(), e);
-                    updateTaskStatus(taskId, "error", 0, "拉取镜像失败: " + e.getMessage(), true, false);
-                    logService.addOperationLog(new OperationLog("拉取镜像", "admin", "拉取失败: " + e.getMessage()));
-                }
-            });
-            // 返回任务ID
-            return taskId;
-        } catch (Exception e) {
-            throw new BusinessException("启动镜像拉取失败: " + e.getMessage());
-
-        }
+        return taskId;
     }
 
     @Override
@@ -435,12 +420,23 @@ public class ImageServiceImpl implements ImageService {
 
             // 拉取镜像
             StringBuilder pullOutput = new StringBuilder();
-            Consumer<String> progressCallback = line -> {
-                pullOutput.append(line).append("\n");
-                log.debug("拉取进度: {}", line);
-            };
-
-            dockerService.pullImage(imageName, tag, progressCallback);
+            dockerService.pullImage(imageName, tag, new PullImageCallback() {
+                @Override
+                public void onProgress(int progress, String status) {
+                    pullOutput.append(status).append("\n");
+                    log.debug("拉取进度: {}", status);
+                }
+                
+                @Override
+                public void onComplete() {
+                    log.info("镜像拉取完成");
+                }
+                
+                @Override
+                public void onError(String error) {
+                    log.error("镜像拉取失败: {}", error);
+                }
+            });
 
             // 同步本地镜像信息到数据库
             Map<String, Object> syncResult = syncLocalImageToDb(imageName, tag);
@@ -614,65 +610,11 @@ public class ImageServiceImpl implements ImageService {
             dataCopy.put("timestamp", System.currentTimeMillis());
 
             // 发送到特定任务的WebSocket主题
-            messagingTemplate.convertAndSend("/topic/image/pull/" + taskId, dataCopy);
+//            messagingTemplate.convertAndSend("/topic/image/pull/" + taskId, dataCopy);
 
             log.info("已发送进度消息: 任务={}, 进度={}%, 状态={}", taskId, dataCopy.get("progress"), dataCopy.get("status"));
         } catch (Exception e) {
             log.error("发送WebSocket消息失败: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 处理镜像拉取进度回调
-     *
-     * @param taskId   任务ID
-     * @param progress 进度信息
-     */
-    private void handlePullProgress(String taskId, String progress) {
-        if (progress == null || taskId == null) {
-            return;
-        }
-
-        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
-        if (taskInfo == null) {
-            return;
-        }
-
-        try {
-            log.info("收到拉取进度: taskId={}, progress={}", taskId, progress);
-
-            // 更新任务信息
-            taskInfo.put("message", progress);
-
-            // 计算进度
-            int currentProgress = 0;
-            if (progress.contains("Getting image source signatures")) {
-                currentProgress = 10;
-            } else if (progress.contains("Copying blob")) {
-                currentProgress = 30;
-            } else if (progress.contains("Copying config")) {
-                currentProgress = 70;
-            } else if (progress.contains("Writing manifest")) {
-                currentProgress = 90;
-            } else if (progress.contains("Storing signatures")) {
-                currentProgress = 100;
-            }
-
-            // 更新进度
-            taskInfo.put("progress", currentProgress);
-
-            // 检查是否完成
-            boolean isCompleted = progress.contains("Storing signatures");
-            if (isCompleted) {
-                taskInfo.put("completed", true);
-                taskInfo.put("status", "success");
-            }
-
-            // 发送进度消息
-            sendPullProgressMessage(taskId, taskInfo);
-
-        } catch (Exception e) {
-            log.error("处理拉取进度失败: {}", e.getMessage(), e);
         }
     }
 
