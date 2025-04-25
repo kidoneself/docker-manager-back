@@ -3,6 +3,7 @@ package com.dsm.api;
 import com.dsm.config.AppConfig;
 import com.dsm.pojo.request.ContainerCreateRequest;
 import com.dsm.websocket.callback.PullImageCallback;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
@@ -515,8 +516,6 @@ public class DockerService {
     }
 
 
-
-
     /**
      * 使用skopeo从远程仓库拉取镜像到宿主机Docker
      *
@@ -621,7 +620,14 @@ public class DockerService {
         pullImageWithSkopeo(image, tag, callback);
     }
 
+    public CreateContainerCmd getCmdByTempJson(JsonNode jsonNode) {
+        return dockerClientWrapper.getCmdByTempJson(jsonNode);
+    }
 
+    public String startContainerWithCmd(CreateContainerCmd containerCmd) {
+       String containerId =  dockerClientWrapper.startContainerWithCmd(containerCmd);
+       return containerId;
+    }
 }
 
 

@@ -1,6 +1,7 @@
 package com.dsm.api;
 
 import com.dsm.exception.DockerErrorResolver;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.*;
 import com.github.dockerjava.api.model.*;
@@ -22,35 +23,24 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 public class DockerClientWrapper {
+
     private final DockerClient dockerClient;
 
     public DockerClientWrapper() {
-        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withDockerHost("unix:///var/run/docker.sock")
-                .build();
-        
-        ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder()
-                .dockerHost(config.getDockerHost())
-                .maxConnections(100)
-                .connectionTimeout(Duration.ofSeconds(30))
-                .responseTimeout(Duration.ofSeconds(45));
+        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().withDockerHost("unix:///var/run/docker.sock").build();
+
+        ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost()).maxConnections(100).connectionTimeout(Duration.ofSeconds(30)).responseTimeout(Duration.ofSeconds(45));
 
         DockerHttpClient httpClient = httpClientBuilder.build();
         dockerClient = DockerClientImpl.getInstance(config, httpClient);
     }
 
     public List<Container> listContainers() {
-        return executeDockerCommandWithResult(() -> 
-            dockerClient.listContainersCmd().withShowAll(true).exec(),
-            "获取容器列表", "all"
-        );
+        return executeDockerCommandWithResult(() -> dockerClient.listContainersCmd().withShowAll(true).exec(), "获取容器列表", "all");
     }
 
     public List<Image> listImages() {
-        return executeDockerCommandWithResult(() -> 
-            dockerClient.listImagesCmd().withShowAll(true).exec(),
-            "获取镜像列表", "all"
-        );
+        return executeDockerCommandWithResult(() -> dockerClient.listImagesCmd().withShowAll(true).exec(), "获取镜像列表", "all");
     }
 
     public void startContainer(String containerId) {
@@ -109,12 +99,7 @@ public class DockerClientWrapper {
 
     public String getContainerLogs(String containerId, int tail, boolean follow, boolean timestamps) {
         return executeDockerCommandWithResult(() -> {
-            LogContainerCmd logContainerCmd = dockerClient.logContainerCmd(containerId)
-                    .withTail(tail)
-                    .withFollowStream(follow)
-                    .withTimestamps(timestamps)
-                    .withStdOut(true)
-                    .withStdErr(true);
+            LogContainerCmd logContainerCmd = dockerClient.logContainerCmd(containerId).withTail(tail).withFollowStream(follow).withTimestamps(timestamps).withStdOut(true).withStdErr(true);
 
             StringBuilder logs = new StringBuilder();
             try {
@@ -141,17 +126,11 @@ public class DockerClientWrapper {
     }
 
     public InspectImageResponse getInspectImage(String imageId) {
-        return executeDockerCommandWithResult(() -> 
-            dockerClient.inspectImageCmd(imageId).exec(),
-            "获取镜像详细信息", imageId
-        );
+        return executeDockerCommandWithResult(() -> dockerClient.inspectImageCmd(imageId).exec(), "获取镜像详细信息", imageId);
     }
 
     public InspectContainerResponse inspectContainerCmd(String containerId) {
-        return executeDockerCommandWithResult(() -> 
-            dockerClient.inspectContainerCmd(containerId).exec(),
-            "获取容器详细信息", containerId
-        );
+        return executeDockerCommandWithResult(() -> dockerClient.inspectContainerCmd(containerId).exec(), "获取容器详细信息", containerId);
     }
 
     public void renameContainer(String containerId, String newName) {
@@ -162,17 +141,11 @@ public class DockerClientWrapper {
     }
 
     public List<Network> listNetworks() {
-        return executeDockerCommandWithResult(() -> 
-            dockerClient.listNetworksCmd().exec(),
-            "获取网络列表", "all"
-        );
+        return executeDockerCommandWithResult(() -> dockerClient.listNetworksCmd().exec(), "获取网络列表", "all");
     }
 
     public CreateContainerResponse createContainer(CreateContainerCmd cmd) {
-        return executeDockerCommandWithResult(() -> 
-            cmd.exec(),
-            "创建容器", cmd.getName()
-        );
+        return executeDockerCommandWithResult(() -> cmd.exec(), "创建容器", cmd.getName());
     }
 
     public CreateContainerCmd createContainerCmd(String imageName) {
@@ -208,4 +181,14 @@ public class DockerClientWrapper {
             throw DockerErrorResolver.resolve(operationName, containerId, e);
         }
     }
-} 
+
+    public CreateContainerCmd getCmdByTempJson(JsonNode jsonNode) {
+        return ContainerCmdFactory.fromJson(dockerClient, jsonNode);
+    }
+
+
+    public String startContainerWithCmd(CreateContainerCmd containerCmd) {
+        String containerId = ContainerStarter.startContainer(dockerClient, containerCmd);
+        return containerId;
+    }
+}
