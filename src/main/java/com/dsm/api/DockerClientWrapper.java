@@ -1,6 +1,9 @@
 package com.dsm.api;
 
+import com.dsm.config.DockerConfig;
 import com.dsm.exception.DockerErrorResolver;
+import com.dsm.utils.ContainerCmdFactory;
+import com.dsm.utils.LogUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.*;
@@ -12,24 +15,38 @@ import com.github.dockerjava.core.InvocationBuilder;
 import com.github.dockerjava.core.command.LogContainerResultCallback;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
 
-@Slf4j
+/**
+ * docker API 操作类
+ */
 @Component
 public class DockerClientWrapper {
 
-    private final DockerClient dockerClient;
+    @Resource
+    private DockerClient dockerClient;
 
-    public DockerClientWrapper() {
-        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().withDockerHost("unix:///var/run/docker.sock").build();
+    @Resource
+    private DockerConfig dockerConfig;
 
-        ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder().dockerHost(config.getDockerHost()).maxConnections(100).connectionTimeout(Duration.ofSeconds(30)).responseTimeout(Duration.ofSeconds(45));
+    @PostConstruct
+    public void init() {
+        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                .withDockerHost(dockerConfig.getHost())
+                .build();
+
+        ApacheDockerHttpClient.Builder httpClientBuilder = new ApacheDockerHttpClient.Builder()
+                .dockerHost(config.getDockerHost())
+                .maxConnections(dockerConfig.getMaxConnections())
+                .connectionTimeout(Duration.ofMillis(dockerConfig.getConnectionTimeout()))
+                .responseTimeout(Duration.ofMillis(dockerConfig.getResponseTimeout()));
 
         DockerHttpClient httpClient = httpClientBuilder.build();
         dockerClient = DockerClientImpl.getInstance(config, httpClient);
@@ -46,28 +63,28 @@ public class DockerClientWrapper {
     public void startContainer(String containerId) {
         executeDockerCommand(() -> {
             dockerClient.startContainerCmd(containerId).exec();
-            log.info("启动容器成功: {}", containerId);
+            LogUtil.log("启动容器成功: " + containerId);
         }, "启动容器", containerId);
     }
 
     public void stopContainer(String containerId) {
         executeDockerCommand(() -> {
             dockerClient.stopContainerCmd(containerId).exec();
-            log.info("停止容器成功: {}", containerId);
+            LogUtil.log("停止容器成功: " + containerId);
         }, "停止容器", containerId);
     }
 
     public void restartContainer(String containerId) {
         executeDockerCommand(() -> {
             dockerClient.restartContainerCmd(containerId).exec();
-            log.info("重启容器成功: {}", containerId);
+            LogUtil.log("重启容器成功: " + containerId);
         }, "重启容器", containerId);
     }
 
     public void removeContainer(String containerId) {
         executeDockerCommand(() -> {
             dockerClient.removeContainerCmd(containerId).withForce(true).exec();
-            log.info("删除容器成功: {}", containerId);
+            LogUtil.log("删除容器成功: " + containerId);
         }, "删除容器", containerId);
     }
 
@@ -91,7 +108,7 @@ public class DockerClientWrapper {
                 dockerClient.pingCmd().exec();
                 return true;
             } catch (Exception e) {
-                log.error("Docker服务不可用: {}", e.getMessage());
+                LogUtil.logSysError("Docker服务不可用: " + e.getMessage());
                 return false;
             }
         }, "检查Docker服务可用性", "system");
@@ -121,7 +138,7 @@ public class DockerClientWrapper {
     public void removeImage(String imageId) {
         executeDockerCommand(() -> {
             dockerClient.removeImageCmd(imageId).withForce(true).exec();
-            log.info("删除镜像成功: {}", imageId);
+            LogUtil.log("删除镜像成功: " + imageId);
         }, "删除镜像", imageId);
     }
 
@@ -136,7 +153,7 @@ public class DockerClientWrapper {
     public void renameContainer(String containerId, String newName) {
         executeDockerCommand(() -> {
             dockerClient.renameContainerCmd(containerId).withName(newName).exec();
-            log.info("重命名容器成功: {} -> {}", containerId, newName);
+            LogUtil.log("重命名容器成功: " + containerId + " -> " + newName);
         }, "重命名容器", containerId);
     }
 
@@ -168,7 +185,7 @@ public class DockerClientWrapper {
         try {
             command.run();
         } catch (Exception e) {
-            log.error("{}失败: {}", action, e.getMessage());
+            LogUtil.logSysError(action + "失败: " + e.getMessage());
             throw DockerErrorResolver.resolve(action, containerId, e);
         }
     }
@@ -177,7 +194,7 @@ public class DockerClientWrapper {
         try {
             return supplier.get();
         } catch (Exception e) {
-            log.error("{}失败: {}", operationName, e.getMessage(), e);
+            LogUtil.logSysError(operationName + "失败: " + e.getMessage());
             throw DockerErrorResolver.resolve(operationName, containerId, e);
         }
     }
@@ -186,9 +203,9 @@ public class DockerClientWrapper {
         return ContainerCmdFactory.fromJson(dockerClient, jsonNode);
     }
 
-
     public String startContainerWithCmd(CreateContainerCmd containerCmd) {
-        String containerId = ContainerStarter.startContainer(dockerClient, containerCmd);
+        String containerId = containerCmd.exec().getId();
+        dockerClient.startContainerCmd(containerId).exec();
         return containerId;
     }
 }

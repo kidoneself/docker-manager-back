@@ -1,17 +1,11 @@
 package com.dsm.service;
 
-import com.dsm.pojo.entity.LogEntry;
-import com.dsm.pojo.entity.OperationLog;
-
+import com.dsm.pojo.entity.Log;
 import java.util.List;
 
 public interface LogService {
-
-    List<LogEntry> getLogs(String level);
-
-    void clearLogs();
-
-    void addOperationLog(OperationLog operationLog);
-
-    void addLog(String level, String content);
+    void addLog(Log log);
+    List<Log> getLogs(String type, String level);
+    List<Log> getRecentLogs(int limit);
+    void cleanupOldLogs(int days);
 } 

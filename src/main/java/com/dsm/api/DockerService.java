@@ -2,6 +2,7 @@ package com.dsm.api;
 
 import com.dsm.config.AppConfig;
 import com.dsm.pojo.request.ContainerCreateRequest;
+import com.dsm.utils.LogUtil;
 import com.dsm.websocket.callback.PullImageCallback;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.dockerjava.api.command.CreateContainerCmd;
@@ -9,7 +10,6 @@ import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.model.*;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
  * Docker服务类，提供与Docker引擎交互的各种操作
  * 包括容器管理、镜像管理、日志查看等功能
  */
-@Slf4j
 @Service
 public class DockerService {
     @Resource
@@ -188,13 +187,13 @@ public class DockerService {
             List<Thread> threads = Thread.getAllStackTraces().keySet().stream().filter(thread -> thread.getName().startsWith("docker-pull-")).collect(Collectors.toList());
 
             if (threads.isEmpty()) {
-                log.warn("未找到正在执行的镜像拉取线程");
+                LogUtil.logSysInfo("未找到正在执行的镜像拉取线程");
                 return;
             }
 
             // 中断所有相关的拉取线程
             for (Thread thread : threads) {
-                log.info("正在中断镜像拉取线程: {}", thread.getName());
+                LogUtil.logSysInfo("正在中断镜像拉取线程: " + thread.getName());
                 thread.interrupt();
             }
 
@@ -204,17 +203,17 @@ public class DockerService {
                 Process process = processBuilder.start();
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
-                    log.info("成功终止 skopeo 进程");
+                    LogUtil.logSysInfo("成功终止 skopeo 进程");
                 } else {
-                    log.warn("终止 skopeo 进程失败，退出码: {}", exitCode);
+                    LogUtil.logSysInfo("终止 skopeo 进程失败，退出码: " + exitCode);
                 }
             } catch (Exception e) {
-                log.error("终止 skopeo 进程时出错: {}", e.getMessage());
+                LogUtil.logSysError("终止 skopeo 进程时出错: " + e.getMessage());
             }
 
-            log.info("已取消镜像拉取操作: {}", imageWithTag);
+            LogUtil.logSysInfo("已取消镜像拉取操作: " + imageWithTag);
         } catch (Exception e) {
-            log.error("取消镜像拉取操作失败: {}", e.getMessage(), e);
+            LogUtil.logSysError("取消镜像拉取操作失败: " + e.getMessage());
             throw new RuntimeException("取消镜像拉取操作失败: " + e.getMessage());
         }
     }
@@ -255,7 +254,7 @@ public class DockerService {
 
             return output.toString().trim();
         } catch (Exception e) {
-            log.error("获取本地镜像创建时间失败: {}", e.getMessage());
+            LogUtil.logSysError("获取本地镜像创建时间失败: " + e.getMessage());
             throw new RuntimeException("获取本地镜像创建时间失败: " + e.getMessage());
         }
     }
@@ -280,7 +279,7 @@ public class DockerService {
             String osName = System.getProperty("os.name").toLowerCase();
             String osArch = System.getProperty("os.arch").toLowerCase();
             if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm64"))) {
-                log.info("检测到Mac ARM架构，强制指定arm64/linux架构参数");
+                LogUtil.logSysInfo("检测到Mac ARM架构，强制指定arm64/linux架构参数");
                 command.add("--override-arch");
                 command.add("arm64");
                 command.add("--override-os");
@@ -342,7 +341,7 @@ public class DockerService {
                 }
             }
         } catch (Exception e) {
-            log.warn("使用 skopeo 获取远程镜像时间失败: {}", e.getMessage());
+            LogUtil.logSysInfo("使用 skopeo 获取远程镜像时间失败: " + e.getMessage());
         }
 
         // 如果 skopeo 失败，尝试使用 regctl
@@ -380,11 +379,11 @@ public class DockerService {
                 }
             }
         } catch (Exception e) {
-            log.warn("使用 regctl 获取远程镜像时间失败: {}", e.getMessage());
+            LogUtil.logSysInfo("使用 regctl 获取远程镜像时间失败: " + e.getMessage());
         }
 
         // 如果两种方法都失败，返回本地镜像时间
-        log.warn("获取远程镜像时间失败，返回本地镜像时间");
+        LogUtil.logSysInfo("获取远程镜像时间失败，返回本地镜像时间");
         return getLocalImageCreateTime(imageName, tag);
     }
 
@@ -399,16 +398,12 @@ public class DockerService {
         // 4. 构建HostConfig
         HostConfig hostConfig = new HostConfig();
 
-        // 设置自动删除暂时没必要
-//            hostConfig.withAutoRemove(request.isAutoRemove());
-
         // 设置重启策略
         if (request.getRestartPolicy() != null) {
             hostConfig.withRestartPolicy(request.getRestartPolicy());
         }
 
         // 设置端口映射
-
         if (request.getPortBindings() != null) {
             hostConfig.withPortBindings(request.getPortBindings());
         }
@@ -461,6 +456,7 @@ public class DockerService {
         if (request.getDnsSearch() != null && !request.getDnsSearch().isEmpty()) {
             hostConfig.withDnsSearch(request.getDnsSearch());
         }
+
         CreateContainerCmd createContainerCmd = dockerClientWrapper.createContainerCmd(imageName).withName(request.getName()).withHostConfig(hostConfig);
         // 设置环境变量
         if (request.getEnv() != null && !request.getEnv().isEmpty()) {
@@ -485,8 +481,7 @@ public class DockerService {
         }
         createContainerCmd.withPrivileged(request.getPrivileged());
 
-        // 6. 创建容器
-        return createContainerCmd.exec();
+        return dockerClientWrapper.createContainer(createContainerCmd);
     }
 
 
@@ -524,7 +519,7 @@ public class DockerService {
      * @param callback 进度回调
      */
     public void pullImageWithSkopeo(String image, String tag, PullImageCallback callback) {
-        log.info("开始使用 skopeo 拉取镜像: {}:{} ", image, tag);
+        LogUtil.logSysInfo("开始使用 skopeo 拉取镜像: " + image + ":" + tag);
         try {
             // 构建完整的镜像名称
             String fullImageName = tag != null && !tag.isEmpty() ? image + ":" + tag : image;
@@ -538,7 +533,7 @@ public class DockerService {
             String osArch = System.getProperty("os.arch").toLowerCase();
             // 只有在Mac的ARM架构(M系列芯片)上才需要指定架构参数
             if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm64"))) {
-                log.info("检测到Mac ARM架构，强制指定arm64/linux架构参数");
+                LogUtil.logSysInfo("检测到Mac ARM架构，强制指定arm64/linux架构参数");
                 // 强制指定为amd64架构和linux系统，解决在Mac ARM芯片上的兼容性问题
                 command.add("--override-arch");
                 command.add("arm64");
@@ -559,14 +554,14 @@ public class DockerService {
             }
             processBuilder.redirectErrorStream(true);
             // 打印完整命令行
-            log.info("执行命令: {},是否使用代理 {}", String.join(" ", command), isProxy);
+            LogUtil.logSysInfo("执行命令: " + String.join(" ", command) + ",是否使用代理 " + isProxy);
             Process process = processBuilder.start();
             // 读取输出
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
                 int progress = 0;
                 while ((line = reader.readLine()) != null) {
-                    log.info("skopeo: {}", line);
+                    LogUtil.logSysInfo("skopeo: " + line);
                     if (callback != null) {
                         // 解析进度
                         if (line.contains("Getting image source signatures")) {
@@ -593,12 +588,12 @@ public class DockerService {
                 }
                 throw new RuntimeException(error);
             }
-            log.info("镜像拉取完成: {}", fullImageName);
+            LogUtil.logSysInfo("镜像拉取完成: " + fullImageName);
             if (callback != null) {
                 callback.onComplete();
             }
         } catch (Exception e) {
-            log.error("使用 skopeo 拉取镜像失败: {}", e.getMessage(), e);
+            LogUtil.logSysError("使用 skopeo 拉取镜像失败: " + e.getMessage());
             if (callback != null) {
                 callback.onError(e.getMessage());
             }
@@ -625,8 +620,8 @@ public class DockerService {
     }
 
     public String startContainerWithCmd(CreateContainerCmd containerCmd) {
-       String containerId =  dockerClientWrapper.startContainerWithCmd(containerCmd);
-       return containerId;
+        String containerId = dockerClientWrapper.startContainerWithCmd(containerCmd);
+        return containerId;
     }
 }
 

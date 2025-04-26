@@ -6,21 +6,20 @@ import com.dsm.pojo.entity.ContainerDetail;
 import com.dsm.pojo.request.ContainerCreateRequest;
 import com.dsm.pojo.request.ContainerUpdateRequest;
 import com.dsm.service.ContainerService;
-import com.dsm.service.LogService;
+import com.dsm.utils.LogUtil;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.RestartPolicy;
 import com.github.dockerjava.api.model.Statistics;
-import com.github.dockerjava.api.model.Volume;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.Resource;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 容器服务实现类
@@ -30,10 +29,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ContainerServiceImpl implements ContainerService {
-    @Resource
     private final DockerService dockerService;
-    @Resource
-    private final LogService logService;
 
     private static void printDockerRunCmd(ContainerCreateRequest request, String imageName) {
         // Implementation of the method
@@ -147,7 +143,7 @@ public class ContainerServiceImpl implements ContainerService {
         try {
             dockerService.stopContainer(containerId);
         } catch (Exception e) {
-            logService.addLog("error", "容器停止失败: " + e.getMessage());
+            LogUtil.logSysError("容器停止失败: " + e.getMessage());
             throw new RuntimeException("停止容器失败: " + e.getMessage());
         }
     }
@@ -157,16 +153,16 @@ public class ContainerServiceImpl implements ContainerService {
         try {
             // 1. 停止原容器
             stopContainer(containerId);
-            logService.addLog("info", "原容器已停止: " + containerId);
+            LogUtil.logSysInfo("原容器已停止: " + containerId);
 
             // 2. 备份原容器配置
             ContainerDetail originalConfig = getContainerConfig(containerId);
             dockerService.renameContainer(containerId, originalConfig.getName() + "_backup");
-            logService.addLog("info", "已备份原容器配置: " + containerId);
+            LogUtil.logSysInfo("已备份原容器配置: " + containerId);
 
             // 3. 创建新容器
             String newContainerId = createContainer(request);
-            logService.addLog("info", "新容器创建成功: " + newContainerId);
+            LogUtil.logSysInfo("新容器创建成功: " + newContainerId);
 
 
             // 5. 验证新容器状态
@@ -179,10 +175,10 @@ public class ContainerServiceImpl implements ContainerService {
 
             // 6. 删除原容器
             removeContainer(containerId);
-            logService.addLog("info", "原容器已删除: " + containerId);
+            LogUtil.logSysInfo("原容器已删除: " + containerId);
 
         } catch (Exception e) {
-            logService.addLog("error", "更新容器失败: " + e.getMessage());
+            LogUtil.logSysError("更新容器失败: " + e.getMessage());
             throw new RuntimeException("更新容器失败: " + e.getMessage());
         }
     }
@@ -216,58 +212,18 @@ public class ContainerServiceImpl implements ContainerService {
 
     @Override
     public String createContainer(ContainerCreateRequest request) {
-        try {
-            // 1. 检查镜像是否存在，并获取镜像信息
-            String imageName = request.getImage();
-            InspectImageResponse imageInfo = null;
-            try {
-                imageInfo = dockerService.getInspectImage(imageName);
-                log.info("获取到镜像信息: {}", imageName);
-            } catch (Exception e) {
-                log.warn("镜像不存在，尝试拉取: {}", imageName);
-            }
-
-            // 检查镜像是否有默认卷，如果有且未被映射，记录警告
-            if (imageInfo != null && Objects.requireNonNull(imageInfo.getConfig()).getVolumes() != null) {
-                Set<String> containerVolumes = imageInfo.getConfig().getVolumes().keySet();
-                Set<String> mappedVolumes = request.getVolumes() != null ? request.getVolumes().stream().map(Volume::getPath).collect(Collectors.toSet()) : Collections.emptySet();
-                // 对于未映射的卷，记录警告
-                containerVolumes.stream().filter(vol -> !mappedVolumes.contains(vol)).forEach(vol -> log.warn("镜像定义的卷 {} 未被映射到主机", vol));
-            }
-            // FIXME: 功能尚未完成，暂不启用
-/*            if (imageInfo == null || request.isAutoPull()) {
-                // 自动拉取镜像
-                ImagePullRequestV2 imagePullRequest = new ImagePullRequestV2();
-                imagePullRequest.setImage(request.getImage());
-                imagePullRequest.setTag(request.getTag());
-                imageService.pullImage(imagePullRequest);
-
-                // 再次获取镜像信息
-                try {
-                    imageInfo = dockerService.getInspectImage(imageName);
-                } catch (Exception e) {
-                    throw new RuntimeException("镜像拉取后仍无法获取信息: " + e.getMessage());
-                }
-            }*/
-            CreateContainerResponse createContainerResponse = dockerService.configureContainerCmd(request);
-            String containerId = createContainerResponse.getId();
-            dockerService.startContainer(containerId);
-            logService.addLog("info", "新容器启动成功: " + containerId);
-            return containerId;
-        } catch (Exception e) {
-            throw new RuntimeException(e.getMessage());
-        }
+        CreateContainerResponse createContainerResponse = dockerService.configureContainerCmd(request);
+        String containerId = createContainerResponse.getId();
+        dockerService.startContainer(containerId);
+        LogUtil.logSysInfo("新容器启动成功: " + containerId);
+        return containerId;
 
     }
 
 
     public boolean isContainerRunning(String containerId) {
-        try {
-            Container container = findContainerByIdOrName(containerId);
-            return container != null && "running".equals(container.getState());
-        } catch (Exception e) {
-            logService.addLog("error", "检查容器状态失败: " + e.getMessage());
-            return false;
-        }
+        Container container = findContainerByIdOrName(containerId);
+        return container != null && "running".equals(container.getState());
+
     }
 }
