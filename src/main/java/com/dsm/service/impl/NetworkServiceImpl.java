@@ -3,7 +3,7 @@ package com.dsm.service.impl;
 import com.dsm.api.DockerService;
 import com.dsm.pojo.dto.IPAMConfigFlatDTO;
 import com.dsm.pojo.dto.NetworkInfoDTO;
-import com.dsm.service.DockerNetworkService;
+import com.dsm.service.NetworkService;
 import com.github.dockerjava.api.model.Network;
 import org.springframework.stereotype.Service;
 
@@ -14,10 +14,21 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-public class DockerNetworkServiceImpl implements DockerNetworkService {
+public class NetworkServiceImpl implements NetworkService {
 
     @Resource
     private DockerService dockerService;
+
+    // 网络模式映射
+    private static final Map<String, String> NETWORK_MODE_MAP = new HashMap<>() {{
+        put("bridge", "桥接模式");
+        put("host", "主机模式");
+        put("none", "禁用网络");
+        put("container", "容器模式");
+        put("macvlan", "Macvlan模式");
+        put("ipvlan", "IPvlan模式");
+        put("custom", "自定义网络");
+    }};
 
     @Override
     public List<NetworkInfoDTO> listNetworks() {
@@ -26,7 +37,6 @@ public class DockerNetworkServiceImpl implements DockerNetworkService {
         List<NetworkInfoDTO> result = new ArrayList<>();
         for (Network network : networks) {
             NetworkInfoDTO dto = new NetworkInfoDTO();
-
             // 基本字段
             dto.setId(network.getId());
             dto.setName(network.getName());
@@ -38,23 +48,17 @@ public class DockerNetworkServiceImpl implements DockerNetworkService {
             dto.setLabels(network.getLabels());
             dto.setOptions(network.getOptions());
 
+            // 设置网络模式的中文显示
+            String driver = network.getName();
+            dto.setNameStr(NETWORK_MODE_MAP.getOrDefault(driver, driver));
+
             // IPAM 字段
             Network.Ipam ipam = network.getIpam();
             if (ipam != null) {
                 dto.setIpamDriver(ipam.getDriver());
                 dto.setIpamOptions(ipam.getOptions());
-
                 // IPAMConfig 转换
                 List<IPAMConfigFlatDTO> ipamConfigList = new ArrayList<>();
-                if (ipamConfigList.size() > 0) {
-                    for (Network.Ipam.Config ipamConfig : ipam.getConfig()) {
-                        IPAMConfigFlatDTO ipamConfigDTO = new IPAMConfigFlatDTO();
-                        ipamConfigDTO.setSubnet(ipamConfig.getSubnet());
-                        ipamConfigDTO.setIpRange(ipamConfig.getIpRange());
-                        ipamConfigDTO.setGateway(ipamConfig.getGateway());
-                        ipamConfigList.add(ipamConfigDTO);
-                    }
-                }
                 dto.setIpamConfig(ipamConfigList);
             }
             // 添加到结果列表
@@ -74,34 +78,11 @@ public class DockerNetworkServiceImpl implements DockerNetworkService {
         networkInfo.put("ipam", network.getIpam());
         networkInfo.put("containers", network.getContainers());
 
+        // 添加网络模式的中文显示
+        String driver = network.getDriver();
+        networkInfo.put("nameStr", NETWORK_MODE_MAP.getOrDefault(driver, driver));
+
         return networkInfo;
     }
 
-    @Override
-    public String createNetwork(Map<String, Object> networkConfig) {
-        String name = (String) networkConfig.get("name");
-        String driver = (String) networkConfig.get("driver");
-        Map<String, Object> ipamConfig = (Map<String, Object>) networkConfig.get("ipam");
-        return dockerService.createNetwork(name, driver, ipamConfig);
-    }
-
-    @Override
-    public void removeNetwork(String networkId) {
-        dockerService.removeNetwork(networkId);
-    }
-
-    @Override
-    public void connectContainer(String networkId, Map<String, Object> connectConfig) {
-        String containerId = (String) connectConfig.get("containerId");
-        String ipAddress = (String) connectConfig.get("ipAddress");
-        String[] aliases = (String[]) connectConfig.get("aliases");
-        dockerService.connectContainerToNetwork(containerId, networkId, ipAddress, aliases);
-    }
-
-    @Override
-    public void disconnectContainer(String networkId, Map<String, Object> disconnectConfig) {
-        String containerId = (String) disconnectConfig.get("containerId");
-        boolean force = (boolean) disconnectConfig.getOrDefault("force", false);
-        dockerService.disconnectContainerFromNetwork(containerId, networkId, force);
-    }
 } 

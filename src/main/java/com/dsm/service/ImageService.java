@@ -17,13 +17,11 @@ public interface ImageService {
 
     Map<String, Object> getPullProgress(String taskId);
 
-    Map<String, Object> cancelPullTask(String taskId);
+    void cancelPullTask(String taskId);
 
     void removeImage(String imageId, boolean removeStatus);
 
     Map<String, Long> testProxyLatency();
-
-    List<ImageStatusDTO> listImageStatus();
 
     void checkAllImagesStatus();
 

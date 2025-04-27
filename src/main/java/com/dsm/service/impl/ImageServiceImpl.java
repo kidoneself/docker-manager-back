@@ -14,7 +14,6 @@ import com.dsm.websocket.callback.PullImageCallback;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.GraphDriver;
 import com.github.dockerjava.api.command.InspectImageResponse;
-import com.github.dockerjava.api.command.RootFS;
 import com.github.dockerjava.api.model.ContainerConfig;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Image;
@@ -131,7 +130,7 @@ public class ImageServiceImpl implements ImageService {
     }
 
     @Override
-    public Map<String, Object> cancelPullTask(String taskId) {
+    public void cancelPullTask(String taskId) {
         Map<String, Object> taskInfo = imagePullTasks.get(taskId);
 
         if (taskInfo == null) {
@@ -153,7 +152,6 @@ public class ImageServiceImpl implements ImageService {
         LogUtil.log("用户取消了拉取镜像: " + image + ":" + tag);
 
         LogUtil.logSysInfo("成功取消镜像拉取任务: " + taskId);
-        return taskInfo;
 
     }
 
@@ -297,64 +295,64 @@ public class ImageServiceImpl implements ImageService {
         return result;
     }
 
-    @Override
-    public List<ImageStatusDTO> listImageStatus() {
-        LogUtil.logSysInfo("获取镜像状态列表");
-        try {
-            // 先同步宿主机镜像到数据库，确保显示最新数据
-            syncAllLocalImagesToDb();
-
-            // 获取所有本地镜像
-            List<Image> images = dockerService.listImages();
-
-            // 获取数据库中的所有镜像状态记录
-            List<ImageStatus> dbRecords = imageStatusMapper.selectAll();
-
-            // 构建数据库记录的映射表，键为"name:tag"
-            Map<String, ImageStatus> dbRecordsMap = dbRecords.stream().collect(Collectors.toMap(record -> record.getName() + ":" + record.getTag(), record -> record, (existing, replacement) -> existing // 如果有重复，保留第一个
-            ));
-
-            // 合并本地镜像和数据库记录
-            List<ImageStatusDTO> result = new ArrayList<>();
-
-            for (Image image : images) {
-                String[] repoTags = image.getRepoTags();
-                if (repoTags != null) {
-                    for (String repoTag : repoTags) {
-                        if (!"<none>:<none>".equals(repoTag)) {
-                            String[] parts = repoTag.split(":");
-                            String name = parts[0];
-                            String tag = parts.length > 1 ? parts[1] : "latest";
-
-                            ImageStatusDTO imageStatusDTO = ImageStatusDTO.builder().id(image.getId()).name(name).tag(tag).size(image.getSize()).created(new Date(image.getCreated() * 1000L)).build();
-
-                            // 添加状态信息
-                            ImageStatus statusRecord = dbRecordsMap.get(name + ":" + tag);
-                            if (statusRecord != null) {
-                                imageStatusDTO.setNeedUpdate(statusRecord.getNeedUpdate());
-                                imageStatusDTO.setStatusId(statusRecord.getId());
-                                imageStatusDTO.setLocalCreateTime(statusRecord.getLocalCreateTime());
-                                imageStatusDTO.setRemoteCreateTime(statusRecord.getRemoteCreateTime());
-
-                                // 将ISO格式日期字符串转换为Date对象
-                                String lastCheckedStr = statusRecord.getLastChecked();
-                                if (lastCheckedStr != null && !lastCheckedStr.isEmpty()) {
-                                    imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
-                                }
-                            }
-
-                            result.add(imageStatusDTO);
-                        }
-                    }
-                }
-            }
-
-            return result;
-        } catch (Exception e) {
-            LogUtil.logSysError("获取镜像状态列表失败: " + e.getMessage());
-            throw new RuntimeException("获取镜像状态列表失败: " + e.getMessage());
-        }
-    }
+//    @Override
+//    public List<ImageStatusDTO> listImageStatus() {
+//        LogUtil.logSysInfo("获取镜像状态列表");
+//        try {
+//            // 先同步宿主机镜像到数据库，确保显示最新数据
+//            syncAllLocalImagesToDb();
+//
+//            // 获取所有本地镜像
+//            List<Image> images = dockerService.listImages();
+//
+//            // 获取数据库中的所有镜像状态记录
+//            List<ImageStatus> dbRecords = imageStatusMapper.selectAll();
+//
+//            // 构建数据库记录的映射表，键为"name:tag"
+//            Map<String, ImageStatus> dbRecordsMap = dbRecords.stream().collect(Collectors.toMap(record -> record.getName() + ":" + record.getTag(), record -> record, (existing, replacement) -> existing // 如果有重复，保留第一个
+//            ));
+//
+//            // 合并本地镜像和数据库记录
+//            List<ImageStatusDTO> result = new ArrayList<>();
+//
+//            for (Image image : images) {
+//                String[] repoTags = image.getRepoTags();
+//                if (repoTags != null) {
+//                    for (String repoTag : repoTags) {
+//                        if (!"<none>:<none>".equals(repoTag)) {
+//                            String[] parts = repoTag.split(":");
+//                            String name = parts[0];
+//                            String tag = parts.length > 1 ? parts[1] : "latest";
+//
+//                            ImageStatusDTO imageStatusDTO = ImageStatusDTO.builder().id(image.getId()).name(name).tag(tag).size(image.getSize()).created(new Date(image.getCreated() * 1000L)).build();
+//
+//                            // 添加状态信息
+//                            ImageStatus statusRecord = dbRecordsMap.get(name + ":" + tag);
+//                            if (statusRecord != null) {
+//                                imageStatusDTO.setNeedUpdate(statusRecord.getNeedUpdate());
+//                                imageStatusDTO.setStatusId(statusRecord.getId());
+//                                imageStatusDTO.setLocalCreateTime(statusRecord.getLocalCreateTime());
+//                                imageStatusDTO.setRemoteCreateTime(statusRecord.getRemoteCreateTime());
+//
+//                                // 将ISO格式日期字符串转换为Date对象
+//                                String lastCheckedStr = statusRecord.getLastChecked();
+//                                if (lastCheckedStr != null && !lastCheckedStr.isEmpty()) {
+//                                    imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
+//                                }
+//                            }
+//
+//                            result.add(imageStatusDTO);
+//                        }
+//                    }
+//                }
+//            }
+//
+//            return result;
+//        } catch (Exception e) {
+//            LogUtil.logSysError("获取镜像状态列表失败: " + e.getMessage());
+//            throw new RuntimeException("获取镜像状态列表失败: " + e.getMessage());
+//        }
+//    }
 
     /**
      * 每小时定时检查所有镜像更新状态
@@ -491,7 +489,6 @@ public class ImageServiceImpl implements ImageService {
                                     imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
                                 }
                             }
-
                             result.add(imageStatusDTO);
                         }
                     }

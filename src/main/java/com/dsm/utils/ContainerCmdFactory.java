@@ -1,16 +1,28 @@
-package com.dsm.api;
+package com.dsm.utils;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.github.dockerjava.api.model.Bind;
-import com.github.dockerjava.api.model.ExposedPort;
-import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.CreateContainerCmd;
+import com.github.dockerjava.api.model.*;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-public class DockerJsonParser {
+/**
+ * 将配置文件中的模板转换成cmd
+ */
+public class ContainerCmdFactory {
+
+    public static CreateContainerCmd fromJson(DockerClient dockerClient, JsonNode cmdJson) {
+        CreateContainerCmd cmd = dockerClient.createContainerCmd(cmdJson.get("Image").asText()).withEnv(parseEnv(cmdJson.get("Env"))).withExposedPorts(parseExposedPorts(cmdJson.get("ExposedPorts")));
+
+        JsonNode hostConfig = cmdJson.get("HostConfig");
+        cmd.withHostConfig(new HostConfig().withPortBindings(parsePortBindings(hostConfig.get("PortBindings"))).withBinds(parseBinds(hostConfig.get("Binds"))).withPrivileged(hostConfig.get("Privileged").asBoolean()).withNetworkMode(hostConfig.get("NetworkMode").asText()).withRestartPolicy(RestartPolicy.parse(hostConfig.get("RestartPolicy").asText())));
+
+        return cmd;
+    }
 
     // 解析环境变量数组
     public static String[] parseEnv(JsonNode envNode) {

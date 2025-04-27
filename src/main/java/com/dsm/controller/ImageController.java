@@ -33,6 +33,7 @@ public class ImageController {
      * @param request 请求体，包含镜像名称和标签
      * @return 包含任务ID的响应
      */
+
     @Operation(summary = "拉取镜像", description = "拉取指定的Docker镜像")
     @PostMapping("/pull")
     public ApiResponse<Map<String, String>> pullImage(@RequestBody ImagePullRequestV2 request) {
@@ -83,7 +84,6 @@ public class ImageController {
     }
 
     /**
-     * TODO  测试代理延迟
      *
      * @return 代理延迟信息
      */
@@ -93,17 +93,11 @@ public class ImageController {
         return ApiResponse.success(imageService.testProxyLatency());
     }
 
-    /**
-     * 获取镜像状态列表
-     *
-     * @return 镜像状态列表，包含更新信息
-     */
-    @Operation(summary = "获取镜像状态列表", description = "获取所有镜像的状态列表，包含更新检查信息")
-    @GetMapping("/status")
-    public ApiResponse<List<ImageStatusDTO>> getImageStatusList() {
-        List<ImageStatusDTO> result = imageService.listImageStatus();
-        return ApiResponse.success(result);
 
+    @Operation(summary = "列出镜像", description = "获取所有镜像的列表（包含更新状态信息）")
+    @GetMapping()
+    public ApiResponse<List<ImageStatusDTO>> listImages() {
+        return ApiResponse.success(imageService.listImages());
     }
 
     /**
@@ -139,11 +133,6 @@ public class ImageController {
         }
     }
 
-    @Operation(summary = "列出镜像", description = "获取所有镜像的列表（包含更新状态信息）")
-    @GetMapping()
-    public ApiResponse<List<ImageStatusDTO>> listImages() {
-        return ApiResponse.success(imageService.listImages());
-    }
 
     /**
      * 获取镜像详情
@@ -152,17 +141,10 @@ public class ImageController {
      */
     @PostMapping("/detail")
     public ApiResponse<ImageInspectDTO> getImageDetail(@RequestBody Map<String, String> request) {
-        try {
             String imageName = request.get("imageName");
-            if (imageName == null || imageName.isEmpty()) {
-                return ApiResponse.error("镜像名称不能为空");
-            }
             ImageInspectDTO imageDetail = imageService.getImageDetail(imageName);
             return ApiResponse.success(imageDetail);
-        } catch (Exception e) {
-            log.error("获取镜像详情失败", e);
-            return ApiResponse.error(e.getMessage());
-        }
+
     }
 
 }

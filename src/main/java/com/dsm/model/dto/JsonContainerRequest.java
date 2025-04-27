@@ -1,4 +1,9 @@
-package com.dsm.pojo.dto;
+package com.dsm.model.dto;
+
+/**
+ * 前端请求容器的参数
+ * 通过JsonContainerRequestToContainerCreateRequestConverter转环成dockerClient能识别的容器创建参数
+ */
 
 import lombok.Data;
 

@@ -1,4 +1,4 @@
-package com.dsm.pojo.request;
+package com.dsm.model.dockerApi;
 
 import com.github.dockerjava.api.model.*;
 import lombok.Data;
@@ -72,6 +72,10 @@ public class ContainerCreateRequest {
     private String[] securityOpts;    // 安全模块配置（如 seccomp 配置）
 
     // ========= 元数据 =========
+    //	•	Label 还可以加版本，比如 "version=1.0"，以后升级也能好分组。
+    //	•	可以组合查询多个 Label，比如：
+    //docker ps --filter "label=project=myapp" --filter "label=env=prod"
+    //	•	用 Label 还能做监控、告警（Prometheus / Grafana 这些都支持 Label 过滤）。
     private Map<String, String> labels; // 自定义标签
 
     // ========= 限制与检查 =========

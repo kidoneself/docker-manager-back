@@ -1,4 +1,4 @@
-package com.dsm.pojo.entity;
+package com.dsm.model.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;

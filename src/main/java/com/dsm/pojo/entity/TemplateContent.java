@@ -1,5 +1,6 @@
 package com.dsm.pojo.entity;
 
+import com.dsm.model.dto.ServiceConfig;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import java.util.List;

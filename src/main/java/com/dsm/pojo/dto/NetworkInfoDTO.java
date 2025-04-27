@@ -55,4 +55,8 @@ public class NetworkInfoDTO {
 
     @JsonProperty("ConfigOnly")
     private boolean configOnly; // 是否仅为配置网络（Swarm 场景使用）
+
+    @JsonProperty("nameStr")
+    private String nameStr; // 英文转中文
+
 }

@@ -35,7 +35,7 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<?> handleRuntimeException(RuntimeException e) {
         log.error("运行时异常", e);
-        return ApiResponse.success(null, "系统内部错误");
+        return ApiResponse.error("系统内部错误");
     }
 
 
@@ -43,9 +43,6 @@ public class GlobalExceptionHandler {
     public ApiResponse<Map<String, Object>> handleDockerException(DockerOperationException ex) {
         log.error("Docker异常", ex);
         return ApiResponse.error(ex.getDetail());
-        //这个是是不带详情的
-        //return ApiResponse.error(ex.getErrorCode().getMessage());
-
     }
 
     /**

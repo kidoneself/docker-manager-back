@@ -1,10 +1,9 @@
 package com.dsm.service;
 
-import com.dsm.pojo.entity.ContainerDetail;
-import com.dsm.pojo.request.ContainerCreateRequest;
-import com.dsm.pojo.request.ContainerUpdateRequest;
-import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.Statistics;
+import com.dsm.model.dockerApi.ContainerCreateRequest;
+import com.dsm.model.dto.ContainerDTO;
+import com.dsm.model.dto.ContainerStaticInfoDTO;
+import com.dsm.model.dto.ResourceUsageDTO;
 
 import java.util.List;
 
@@ -18,7 +17,7 @@ public interface ContainerService {
      *
      * @return 容器列表
      */
-    List<Container> listContainers();
+    List<ContainerDTO> listContainers();
 
 
     /**
@@ -34,7 +33,7 @@ public interface ContainerService {
      * @param containerId 容器ID
      * @return 容器统计信息
      */
-    Statistics getContainerStats(String containerId);
+    ResourceUsageDTO getContainerStats(String containerId);
 
     /**
      * 获取容器配置信息
@@ -42,7 +41,7 @@ public interface ContainerService {
      * @param containerId 容器ID
      * @return 容器配置信息
      */
-    ContainerDetail getContainerConfig(String containerId);
+    ContainerStaticInfoDTO getContainerConfig(String containerId);
 
     /**
      * 启动容器
@@ -66,14 +65,6 @@ public interface ContainerService {
      * @param request     新的容器配置请求
      */
     void updateContainer(String containerId, ContainerCreateRequest request);
-
-    /**
-     * 根据配置创建新容器
-     *
-     * @param request 容器配置请求
-     * @return 新容器ID
-     */
-    String createContainerWithConfig(ContainerUpdateRequest request);
 
 
     void restartContainer(String id);

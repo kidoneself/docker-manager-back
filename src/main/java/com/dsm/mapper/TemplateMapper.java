@@ -24,13 +24,5 @@ public interface TemplateMapper {
      */
     Template selectTemplateById(@Param("id") String id);
 
-    /**
-     * 插入模板
-     */
-    int insertTemplate(Template template);
 
-    /**
-     * 更新模板
-     */
-    int updateTemplate(Template template);
-} 
+}

@@ -32,8 +32,5 @@ public class SystemSettingServiceImpl implements SystemSettingService {
         eventPublisher.publishEvent(new SystemSettingChangedEvent(key, oldValue, value));
     }
 
-    @Override
-    public List<SystemSetting> getAll() {
-        return systemSettingMapper.getAllSettings();
-    }
+
 }

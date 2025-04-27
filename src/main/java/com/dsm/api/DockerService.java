@@ -1,7 +1,9 @@
 package com.dsm.api;
 
 import com.dsm.config.AppConfig;
-import com.dsm.pojo.request.ContainerCreateRequest;
+import com.dsm.model.dockerApi.ContainerCreateRequest;
+import com.dsm.model.dto.ResourceUsageDTO;
+import com.dsm.utils.DockerStatsConverter;
 import com.dsm.utils.LogUtil;
 import com.dsm.websocket.callback.PullImageCallback;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -98,8 +100,9 @@ public class DockerService {
      * @param containerId 容器ID
      * @return 容器统计信息对象
      */
-    public Statistics getContainerStats(String containerId) {
-        return dockerClientWrapper.getContainerStats(containerId);
+    public ResourceUsageDTO getContainerStats(String containerId) {
+        Statistics containerStats = dockerClientWrapper.getContainerStats(containerId);
+        return DockerStatsConverter.convert(containerStats);
     }
 
 
@@ -387,105 +390,246 @@ public class DockerService {
         return getLocalImageCreateTime(imageName, tag);
     }
 
+//    public CreateContainerResponse configureContainerCmd(ContainerCreateRequest request) {
+//        String imageName = request.getImage();
+//        // 4. 构建HostConfig
+//        HostConfig hostConfig = new HostConfig();
+//
+//        // 设置重启策略
+//        if (request.getRestartPolicy() != null) {
+//            hostConfig.withRestartPolicy(request.getRestartPolicy());
+//        }
+//
+//        // 设置端口映射
+//        if (request.getPortBindings() != null) {
+//            hostConfig.withPortBindings(request.getPortBindings());
+//        }
+//
+//        // 设置卷挂载
+//        if (request.getBinds() != null) {
+//            hostConfig.withBinds(request.getBinds());
+//        }
+//
+//        // 设置其他HostConfig配置
+//        if (request.getNetworkMode() != null) {
+//            hostConfig.withNetworkMode(request.getNetworkMode());
+//        }
+//
+//        if (request.getMemory() != null) {
+//            hostConfig.withMemory(request.getMemory());
+//        }
+//        if (request.getMemorySwap() != null) {
+//            hostConfig.withMemorySwap(request.getMemorySwap());
+//        }
+//        if (request.getCpuShares() != null) {
+//            hostConfig.withCpuShares(request.getCpuShares());
+//        }
+//        if (request.getCpusetCpus() != null) {
+//            hostConfig.withCpusetCpus(request.getCpusetCpus());
+//        }
+//        if (request.getCpuPeriod() != null) {
+//            hostConfig.withCpuPeriod(request.getCpuPeriod());
+//        }
+//        if (request.getCpuQuota() != null) {
+//            hostConfig.withCpuQuota(request.getCpuQuota());
+//        }
+//
+//        if (request.getShmSize() != null) {
+//            hostConfig.withShmSize(Long.valueOf(request.getShmSize()));
+//        }
+//
+//        if (request.getDevices() != null) {
+//            hostConfig.withDevices(request.getDevices());
+//        }
+//        if (request.getUlimits() != null) {
+//            hostConfig.withUlimits(request.getUlimits());
+//        }
+//        if (request.getExtraHosts() != null && !request.getExtraHosts().isEmpty()) {
+//            hostConfig.withExtraHosts(request.getExtraHosts().toArray(new String[0]));
+//        }
+//        if (request.getDns() != null && !request.getDns().isEmpty()) {
+//            hostConfig.withDns(request.getDns());
+//        }
+//        if (request.getDnsSearch() != null && !request.getDnsSearch().isEmpty()) {
+//            hostConfig.withDnsSearch(request.getDnsSearch());
+//        }
+//
+//        CreateContainerCmd createContainerCmd = dockerClientWrapper.createContainerCmd(imageName).withName(request.getName()).withHostConfig(hostConfig);
+//        // 设置环境变量
+//        if (request.getEnv() != null && !request.getEnv().isEmpty()) {
+//            createContainerCmd.withEnv(request.getEnv());
+//        }
+//        // 设置其他配置
+//        if (request.getLabels() != null && !request.getLabels().isEmpty()) {
+//            createContainerCmd.withLabels(request.getLabels());
+//        }
+//        //这个就好比IPTV用这个
+//        if (request.getCmd() != null && !request.getCmd().isEmpty()) {
+//            createContainerCmd.withCmd(request.getCmd());
+//        }
+//        // 如果指定了Entrypoint，则使用；否则保留镜像的默认Entrypoint
+//        //这个似乎覆盖了就不行了
+//        if (request.getEntrypoint() != null && !request.getEntrypoint().isEmpty()) {
+//            createContainerCmd.withEntrypoint(request.getEntrypoint());
+//        }
+//        if (request.getWorkingDir() != null) {
+//            createContainerCmd.withWorkingDir(request.getWorkingDir());
+//        }
+//        if (request.getUser() != null) {
+//            createContainerCmd.withUser(request.getUser());
+//        }
+//        createContainerCmd.withPrivileged(request.getPrivileged());
+//
+//        return dockerClientWrapper.createContainer(createContainerCmd);
+//    }
+
     /**
-     * 配置容器创建命令
-     *
-     * @param request 容器创建请求
-     * @return 配置好的容器创建命令
+     * 配置并创建容器（精简 + 完整备注版）
+     * 常用字段直接设置，不常用字段保留注释，且详细说明用途
      */
     public CreateContainerResponse configureContainerCmd(ContainerCreateRequest request) {
         String imageName = request.getImage();
-        // 4. 构建HostConfig
+
         HostConfig hostConfig = new HostConfig();
 
-        // 设置重启策略
+        // ======================== 常用 HostConfig ========================
+
+        // 重启策略（如 always, on-failure 等）
         if (request.getRestartPolicy() != null) {
             hostConfig.withRestartPolicy(request.getRestartPolicy());
         }
 
-        // 设置端口映射
+        // 端口映射（容器端口和宿主机端口的绑定）
         if (request.getPortBindings() != null) {
             hostConfig.withPortBindings(request.getPortBindings());
         }
 
-        // 设置卷挂载
+        // 卷挂载（把宿主机目录挂到容器里）
         if (request.getBinds() != null) {
             hostConfig.withBinds(request.getBinds());
         }
 
-        // 设置其他HostConfig配置
+        // 网络模式（如 bridge、host、自定义网络）
         if (request.getNetworkMode() != null) {
             hostConfig.withNetworkMode(request.getNetworkMode());
         }
 
-        if (request.getMemory() != null) {
-            hostConfig.withMemory(request.getMemory());
-        }
-        if (request.getMemorySwap() != null) {
-            hostConfig.withMemorySwap(request.getMemorySwap());
-        }
-        if (request.getCpuShares() != null) {
-            hostConfig.withCpuShares(request.getCpuShares());
-        }
-        if (request.getCpusetCpus() != null) {
-            hostConfig.withCpusetCpus(request.getCpusetCpus());
-        }
-        if (request.getCpuPeriod() != null) {
-            hostConfig.withCpuPeriod(request.getCpuPeriod());
-        }
-        if (request.getCpuQuota() != null) {
-            hostConfig.withCpuQuota(request.getCpuQuota());
-        }
+        // ======================== 不常用 HostConfig（注释保留） ========================
 
-        if (request.getShmSize() != null) {
-            hostConfig.withShmSize(Long.valueOf(request.getShmSize()));
-        }
-
+        // 授权宿主机的物理设备（比如 GPU）给容器
         if (request.getDevices() != null) {
             hostConfig.withDevices(request.getDevices());
         }
-        if (request.getUlimits() != null) {
-            hostConfig.withUlimits(request.getUlimits());
-        }
-        if (request.getExtraHosts() != null && !request.getExtraHosts().isEmpty()) {
-            hostConfig.withExtraHosts(String.valueOf(request.getExtraHosts()));
-        }
-        if (request.getDns() != null && !request.getDns().isEmpty()) {
-            hostConfig.withDns(request.getDns());
-        }
-        if (request.getDnsSearch() != null && !request.getDnsSearch().isEmpty()) {
-            hostConfig.withDnsSearch(request.getDnsSearch());
-        }
+    /*
+    // 限制容器内存使用上限（单位：字节）
+    if (request.getMemory() != null) {
+        hostConfig.withMemory(request.getMemory());
+    }
+
+    // 限制容器内存+swap总量（单位：字节）
+    if (request.getMemorySwap() != null) {
+        hostConfig.withMemorySwap(request.getMemorySwap());
+    }
+
+    // 容器的 CPU 份额（相对权重）
+    if (request.getCpuShares() != null) {
+        hostConfig.withCpuShares(request.getCpuShares());
+    }
+
+    // 指定容器可以使用哪些 CPU 核心，比如 "0,1"
+    if (request.getCpusetCpus() != null) {
+        hostConfig.withCpusetCpus(request.getCpusetCpus());
+    }
+
+    // 设置 CPU 调度周期（单位：微秒）
+    if (request.getCpuPeriod() != null) {
+        hostConfig.withCpuPeriod(request.getCpuPeriod());
+    }
+
+    // 设置 CPU 配额（配合 Period 控制 CPU 时间）
+    if (request.getCpuQuota() != null) {
+        hostConfig.withCpuQuota(request.getCpuQuota());
+    }
+
+    // 容器的共享内存大小，默认64M，适合 Chrome/数据库应用调大
+    if (request.getShmSize() != null) {
+        hostConfig.withShmSize(Long.valueOf(request.getShmSize()));
+    }
+
+    // 设置系统资源限制（如打开文件数、进程数）
+    if (request.getUlimits() != null) {
+        hostConfig.withUlimits(request.getUlimits());
+    }
+
+    // 额外添加自定义 hosts 记录（比如 "myapp.local:127.0.0.1"）
+    if (request.getExtraHosts() != null && !request.getExtraHosts().isEmpty()) {
+        hostConfig.withExtraHosts(request.getExtraHosts().toArray(new String[0]));
+    }
+
+    // 配置容器使用的 DNS 服务器
+    if (request.getDns() != null && !request.getDns().isEmpty()) {
+        hostConfig.withDns(request.getDns());
+    }
+
+    // 配置 DNS 搜索域
+    if (request.getDnsSearch() != null && !request.getDnsSearch().isEmpty()) {
+        hostConfig.withDnsSearch(request.getDnsSearch());
+    }
+    */
+
+        // ======================== CreateContainerCmd 配置 ========================
 
         CreateContainerCmd createContainerCmd = dockerClientWrapper.createContainerCmd(imageName).withName(request.getName()).withHostConfig(hostConfig);
-        // 设置环境变量
+
+        // 设置环境变量（如 ["ENV=prod", "DEBUG=false"]）
         if (request.getEnv() != null && !request.getEnv().isEmpty()) {
             createContainerCmd.withEnv(request.getEnv());
         }
-        // 设置其他配置
+
+        // 设置 Labels（容器的自定义标签，方便管理/查询）
+        //docker stop $(docker ps -q --filter "label=app=nginx-stack")
         if (request.getLabels() != null && !request.getLabels().isEmpty()) {
             createContainerCmd.withLabels(request.getLabels());
         }
-        if (request.getCmd() != null && !request.getCmd().isEmpty()) {
+
+        // 设置启动命令（CMD），如果需要自定义启动指令
+        if (request.getCmd() != null && !request.getCmd().isEmpty() && !isEmptyCommandList(request.getCmd())) {
             createContainerCmd.withCmd(request.getCmd());
         }
-        // 如果指定了Entrypoint，则使用；否则保留镜像的默认Entrypoint
-        if (request.getEntrypoint() != null && !request.getEntrypoint().isEmpty()) {
-            createContainerCmd.withEntrypoint(request.getEntrypoint());
-        }
-        if (request.getWorkingDir() != null) {
-            createContainerCmd.withWorkingDir(request.getWorkingDir());
-        }
-        if (request.getUser() != null) {
-            createContainerCmd.withUser(request.getUser());
-        }
-        createContainerCmd.withPrivileged(request.getPrivileged());
+
+        // ======================== 不常用容器参数（注释保留） ========================
+
+    /*
+    // 覆盖镜像默认的 Entrypoint（慎用！）
+    if (request.getEntrypoint() != null && !request.getEntrypoint().isEmpty() && !isEmptyCommandList(request.getEntrypoint())) {
+        createContainerCmd.withEntrypoint(request.getEntrypoint());
+    }
+
+    // 指定容器内工作目录（一般镜像已定义）
+    if (request.getWorkingDir() != null && !request.getWorkingDir().trim().isEmpty()) {
+        createContainerCmd.withWorkingDir(request.getWorkingDir());
+    }
+
+    // 指定容器运行用户（一般镜像已定义，比如 nginx 用户）
+    if (request.getUser() != null && !request.getUser().trim().isEmpty()) {
+        createContainerCmd.withUser(request.getUser());
+    }
+    */
+
+        // 设置是否启用特权模式（容器可以访问宿主机所有设备）
+        createContainerCmd.withPrivileged(Boolean.TRUE.equals(request.getPrivileged()));
 
         return dockerClientWrapper.createContainer(createContainerCmd);
     }
 
+    /**
+     * 判断命令列表是否全是空白，避免误覆盖默认 CMD/Entrypoint
+     */
+    private boolean isEmptyCommandList(List<String> cmdList) {
+        return cmdList.stream().allMatch(cmd -> cmd == null || cmd.trim().isEmpty());
+    }
 
-    // FIXME: 功能尚未完成，暂不启用
+
     public Network inspectNetwork(String networkId) {
         return null;
     }

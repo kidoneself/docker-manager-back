@@ -23,9 +23,13 @@ public class DockerErrorResolver {
                 errorCode = DockerErrorCode.INVALID_CONFIG;
             } else if (message.contains("Cannot connect to the Docker daemon")) {
                 errorCode = DockerErrorCode.DOCKER_DAEMON_UNAVAILABLE;
+            } else if (message.contains("Conflict. The container name") && message.contains("is already in use")) {
+                errorCode = DockerErrorCode.CONTAINER_NAME_CONFLICT;
+            } else if (message.contains("Mounts denied") && message.contains("is not shared from the host")) {
+                errorCode = DockerErrorCode.MOUNT_PATH_NOT_SHARED;
             }
         }
 
-        return new DockerOperationException(errorCode, String.format("%s失败:%s", action, errorCode.getMessage()), e);
+        return new DockerOperationException(errorCode, String.format("%s失败：%s", action, errorCode.getMessage()), e);
     }
 }

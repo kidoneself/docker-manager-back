@@ -1,7 +1,7 @@
 package com.dsm.utils;
 
 import com.dsm.pojo.dto.ContainerCreateDTO;
-import com.dsm.pojo.request.ContainerCreateRequest;
+import com.dsm.model.dockerApi.ContainerCreateRequest;
 import com.github.dockerjava.api.model.*;
 
 import java.util.List;

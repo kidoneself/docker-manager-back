@@ -162,7 +162,7 @@ public class DockerClientWrapper {
     }
 
     public CreateContainerResponse createContainer(CreateContainerCmd cmd) {
-        return executeDockerCommandWithResult(() -> cmd.exec(), "创建容器", cmd.getName());
+        return executeDockerCommandWithResult(cmd::exec, "创建容器", cmd.getName());
     }
 
     public CreateContainerCmd createContainerCmd(String imageName) {

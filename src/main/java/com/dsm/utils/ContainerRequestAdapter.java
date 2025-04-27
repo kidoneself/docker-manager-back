@@ -1,7 +1,7 @@
 package com.dsm.utils;
 
 import com.dsm.pojo.dto.ContainerCreateDTO;
-import com.dsm.pojo.dto.JsonContainerRequest;
+import com.dsm.model.dto.JsonContainerRequest;
 
 import java.util.*;
 import java.util.stream.Collectors;

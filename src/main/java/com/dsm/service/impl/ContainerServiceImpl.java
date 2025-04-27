@@ -1,25 +1,25 @@
 package com.dsm.service.impl;
 
 import com.dsm.api.DockerService;
-import com.dsm.pojo.dto.image.ImageInspectDTO;
-import com.dsm.pojo.entity.ContainerDetail;
-import com.dsm.pojo.request.ContainerCreateRequest;
+import com.dsm.exception.BusinessException;
+import com.dsm.model.dockerApi.ContainerCreateRequest;
+import com.dsm.model.dto.ContainerDTO;
+import com.dsm.model.dto.ContainerStaticInfoDTO;
+import com.dsm.model.dto.ResourceUsageDTO;
 import com.dsm.pojo.request.ContainerUpdateRequest;
 import com.dsm.service.ContainerService;
+import com.dsm.utils.ContainerStaticInfoConverter;
 import com.dsm.utils.LogUtil;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.RestartPolicy;
-import com.github.dockerjava.api.model.Statistics;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 容器服务实现类
@@ -27,13 +27,10 @@ import java.util.Objects;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ContainerServiceImpl implements ContainerService {
-    private final DockerService dockerService;
 
-    private static void printDockerRunCmd(ContainerCreateRequest request, String imageName) {
-        // Implementation of the method
-    }
+    @Autowired
+    private DockerService dockerService;
 
     /**
      * 获取容器列表
@@ -41,13 +38,13 @@ public class ContainerServiceImpl implements ContainerService {
      * @return
      */
     @Override
-    public List<Container> listContainers() {
-        try {
-            return dockerService.listContainers();
-        } catch (RuntimeException e) {
-            throw new RuntimeException("获取容器列表失败: " + e.getMessage());
-        }
+    public List<ContainerDTO> listContainers() {
+        // 获取 Docker 容器列表
+        List<Container> containers = dockerService.listContainers();
+        // 转换成 ContainerDTO 列表
+        return containers.stream().map(ContainerDTO::convertToDTO).collect(Collectors.toList());
     }
+
 
     @Override
     public void removeContainer(String containerId) {
@@ -55,138 +52,73 @@ public class ContainerServiceImpl implements ContainerService {
     }
 
     @Override
-    public Statistics getContainerStats(String containerId) {
+    public ResourceUsageDTO getContainerStats(String containerId) {
         return dockerService.getContainerStats(containerId);
 
     }
 
     @Override
-    public ContainerDetail getContainerConfig(String containerId) {
+    public ContainerStaticInfoDTO getContainerConfig(String containerId) {
         // 获取容器详细信息
-        InspectContainerResponse inspectResponse = dockerService.inspectContainerCmd(containerId);
-
-        // 创建并填充 ContainerDetail2 对象
-        ContainerDetail containerDetail = new ContainerDetail();
-
-        // 基本信息
-        containerDetail.setImage(inspectResponse.getConfig().getImage());
-        containerDetail.setName(inspectResponse.getName().replaceFirst("/", ""));
-
-        // 重启策略
-        RestartPolicy restartPolicy = inspectResponse.getHostConfig().getRestartPolicy();
-        if (restartPolicy != null) {
-            containerDetail.setRestartPolicy(restartPolicy.getName());
-        }
-
-        // 网络模式
-        containerDetail.setNetworkMode(inspectResponse.getHostConfig().getNetworkMode());
-
-        // 端口映射
-        List<ContainerDetail.PortMapping> portMappings = new ArrayList<>();
-        if (inspectResponse.getNetworkSettings().getPorts() != null) {
-            inspectResponse.getNetworkSettings().getPorts().getBindings().forEach((containerPort, hostPorts) -> {
-                if (hostPorts != null && hostPorts.length > 0) {
-                    ContainerDetail.PortMapping mapping = new ContainerDetail.PortMapping();
-                    mapping.setContainerPort(containerPort.getPort());
-                    mapping.setProtocol(containerPort.getProtocol().toString());
-                    mapping.setHostPort(Integer.parseInt(hostPorts[0].getHostPortSpec()));
-                    portMappings.add(mapping);
-                }
-            });
-        }
-        containerDetail.setPortMappings(portMappings);
-
-        // 卷映射
-        List<ContainerDetail.VolumeMapping> volumeMappings = new ArrayList<>();
-        if (inspectResponse.getMounts() != null) {
-            for (InspectContainerResponse.Mount mount : inspectResponse.getMounts()) {
-                ContainerDetail.VolumeMapping mapping = new ContainerDetail.VolumeMapping();
-                mapping.setHostPath(mount.getSource());
-                mapping.setContainerPath(Objects.requireNonNull(mount.getDestination()).getPath());
-                mapping.setReadOnly(Boolean.FALSE.equals(mount.getRW()));
-                volumeMappings.add(mapping);
-            }
-        }
-        containerDetail.setVolumeMappings(volumeMappings);
-
-        // 环境变量
-        List<ContainerDetail.EnvironmentVariable> envVars = new ArrayList<>();
-        if (inspectResponse.getConfig().getEnv() != null) {
-            for (String env : inspectResponse.getConfig().getEnv()) {
-                String[] parts = env.split("=", 2);
-                if (parts.length == 2) {
-                    ContainerDetail.EnvironmentVariable envVar = new ContainerDetail.EnvironmentVariable();
-                    envVar.setKey(parts[0]);
-                    envVar.setValue(parts[1]);
-                    envVars.add(envVar);
-                }
-            }
-        }
-        containerDetail.setEnvironmentVariables(envVars);
-        // 特权模式
-        containerDetail.setPrivileged(inspectResponse.getHostConfig().getPrivileged());
-        ImageInspectDTO dto = new ImageInspectDTO();
-        return containerDetail;
+        InspectContainerResponse inspect = dockerService.inspectContainerCmd(containerId);
+        return ContainerStaticInfoConverter.convert(inspect);
     }
 
     @Override
     public void startContainer(String containerId) {
-        try {
-            dockerService.startContainer(containerId);
-        } catch (Exception e) {
-            throw new RuntimeException("启动容器失败: " + e.getMessage());
-        }
+        dockerService.startContainer(containerId);
     }
 
     @Override
     public void stopContainer(String containerId) {
-        try {
-            dockerService.stopContainer(containerId);
-        } catch (Exception e) {
-            LogUtil.logSysError("容器停止失败: " + e.getMessage());
-            throw new RuntimeException("停止容器失败: " + e.getMessage());
-        }
+        dockerService.stopContainer(containerId);
     }
 
     @Override
     public void updateContainer(String containerId, ContainerCreateRequest request) {
+        ContainerStaticInfoDTO originalConfig = null;
+        String newContainerId = null;
+        
         try {
             // 1. 停止原容器
             stopContainer(containerId);
-            LogUtil.logSysInfo("原容器已停止: " + containerId);
 
             // 2. 备份原容器配置
-            ContainerDetail originalConfig = getContainerConfig(containerId);
-            dockerService.renameContainer(containerId, originalConfig.getName() + "_backup");
-            LogUtil.logSysInfo("已备份原容器配置: " + containerId);
+            originalConfig = getContainerConfig(containerId);
+            dockerService.renameContainer(containerId, originalConfig.getContainerName() + "_backup");
 
             // 3. 创建新容器
-            String newContainerId = createContainer(request);
-            LogUtil.logSysInfo("新容器创建成功: " + newContainerId);
+            newContainerId = createContainer(request);
 
-
-            // 5. 验证新容器状态
+            // 4. 验证新容器状态
             if (!isContainerRunning(newContainerId)) {
-                removeContainer(newContainerId);
-                dockerService.renameContainer(containerId, originalConfig.getName());
-                startContainer(containerId);
-                throw new RuntimeException("新容器启动失败");
+                throw new BusinessException("创建新容器失败");
             }
 
-            // 6. 删除原容器
+            // 5. 删除原容器
             removeContainer(containerId);
             LogUtil.logSysInfo("原容器已删除: " + containerId);
 
         } catch (Exception e) {
             LogUtil.logSysError("更新容器失败: " + e.getMessage());
+            // 如果新容器创建成功但启动失败，删除新容器
+            if (newContainerId != null) {
+                try {
+                    removeContainer(newContainerId);
+                } catch (Exception ex) {
+                    LogUtil.logSysError("删除失败的新容器时出错: " + ex.getMessage());
+                }
+            }
             throw new RuntimeException("更新容器失败: " + e.getMessage());
+        } finally {
+            // 确保原容器状态恢复
+            if (originalConfig != null) {
+                restoreOriginalContainer(containerId, originalConfig);
+            }
         }
     }
 
-    @Override
-    public String createContainerWithConfig(ContainerUpdateRequest request) {
-        return null;
-    }
+
 
     /**
      * 根据容器ID或名称查找容器
@@ -207,7 +139,6 @@ public class ContainerServiceImpl implements ContainerService {
     @Override
     public String getContainerLogs(String containerId, int tail, boolean follow, boolean timestamps) {
         return dockerService.getContainerLogs(containerId, tail, follow, timestamps);
-
     }
 
     @Override
@@ -215,7 +146,6 @@ public class ContainerServiceImpl implements ContainerService {
         CreateContainerResponse createContainerResponse = dockerService.configureContainerCmd(request);
         String containerId = createContainerResponse.getId();
         dockerService.startContainer(containerId);
-        LogUtil.logSysInfo("新容器启动成功: " + containerId);
         return containerId;
 
     }
@@ -224,6 +154,26 @@ public class ContainerServiceImpl implements ContainerService {
     public boolean isContainerRunning(String containerId) {
         Container container = findContainerByIdOrName(containerId);
         return container != null && "running".equals(container.getState());
+    }
 
+    /**
+     * 恢复原容器状态
+     * @param containerId 原容器ID
+     * @param originalConfig 原容器配置
+     */
+    private void restoreOriginalContainer(String containerId, ContainerStaticInfoDTO originalConfig) {
+        try {
+            // 检查原容器是否存在且被重命名
+            Container container = findContainerByIdOrName(containerId);
+            if (container != null && container.getNames()[0].endsWith("_backup")) {
+                // 恢复原容器名称
+                dockerService.renameContainer(containerId, originalConfig.getContainerName());
+                // 启动原容器
+                startContainer(containerId);
+                LogUtil.logSysInfo("原容器状态已恢复: " + containerId);
+            }
+        } catch (Exception e) {
+            LogUtil.logSysError("恢复原容器状态失败: " + e.getMessage());
+        }
     }
 }

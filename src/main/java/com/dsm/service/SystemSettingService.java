@@ -9,5 +9,4 @@ public interface SystemSettingService {
 
     void set(String key, String value);
 
-    List<SystemSetting> getAll();
 }

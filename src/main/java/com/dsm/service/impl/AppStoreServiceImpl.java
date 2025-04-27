@@ -33,7 +33,6 @@ public class AppStoreServiceImpl implements AppStoreService {
         result.setSize(param.getSize());
         result.setCurrent(param.getPage());
         result.setPages((total + param.getSize() - 1) / param.getSize());
-
         return result;
     }
 
@@ -42,29 +41,6 @@ public class AppStoreServiceImpl implements AppStoreService {
         return templateMapper.selectTemplateById(id);
     }
 
-    @Override
-    public Template getTemplateInstallConfig(String id) {
-        // 获取模板详情
-        var template = getTemplate(id);
-        if (template == null) {
-            return null;
-        }
-        // 这里可以添加额外的安装配置处理逻辑
-        return template;
-    }
 
-    @Override
-    public void addTemplate(Template template) {
-        templateMapper.insertTemplate(template);
-    }
 
-    @Override
-    public void updateTemplate(Template template) {
-        templateMapper.updateTemplate(template);
-    }
-
-    @Override
-    public void deleteTemplate(String id) {
-        // 实现删除逻辑
-    }
 } 
