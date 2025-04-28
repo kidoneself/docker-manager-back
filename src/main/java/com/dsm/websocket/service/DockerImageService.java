@@ -1,6 +1,7 @@
 package com.dsm.websocket.service;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.dsm.api.DockerService;
 import com.dsm.service.ImageService;
 import com.dsm.websocket.callback.PullImageCallback;
@@ -18,7 +19,7 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 @Service
 public class DockerImageService {
-    
+
     @Autowired
     private DockerService dockerService;
 
@@ -26,7 +27,7 @@ public class DockerImageService {
     private ImageService imageService;
     @Autowired
     private DockerWebSocketMessageSender messageSender;
-    
+
     public void handlePullImage(WebSocketSession session, DockerWebSocketMessage message) {
         @SuppressWarnings("unchecked") Map<String, Object> data = (Map<String, Object>) message.getData();
         String imageName = (String) data.get("imageName");
@@ -68,15 +69,18 @@ public class DockerImageService {
             }
         });
     }
-    
+
     public void handleInstallCheckImages(WebSocketSession session, DockerWebSocketMessage message) {
         try {
-            @SuppressWarnings("unchecked") List<Map<String, String>> images = (List<Map<String, String>>) message.getData();
+            @SuppressWarnings("unchecked") Map<String, Object> data = (Map<String, Object>) message.getData();
+            JSONArray images = (JSONArray) data.get("images");
+
             List<Map<String, Object>> results = new ArrayList<>();
 
-            for (Map<String, String> image : images) {
-                String imageName = image.get("name");
-                String tag = image.get("tag");
+            for (Object obj : images) {
+                JSONObject image = (JSONObject) obj;
+                String imageName = image.getString("name");
+                String tag = image.getString("tag");
                 String fullImageName = tag != null && !tag.isEmpty() ? imageName + ":" + tag : imageName;
 
                 Map<String, Object> result = new HashMap<>();
@@ -102,7 +106,7 @@ public class DockerImageService {
             messageSender.sendErrorMessage(session, "检查镜像失败: " + e.getMessage());
         }
     }
-    
+
     public void handleInstallPullImage(WebSocketSession session, DockerWebSocketMessage message) {
         // TODO: 实现拉取安装所需镜像的逻辑
     }
@@ -165,7 +169,7 @@ public class DockerImageService {
     public void handleCheckImageUpdates(WebSocketSession session, DockerWebSocketMessage message) {
         try {
             String taskId = UUID.randomUUID().toString();
-            
+
             // 发送开始消息
             messageSender.sendMessage(session, new DockerWebSocketMessage("CHECK_UPDATES_START", taskId, null));
 
@@ -174,7 +178,7 @@ public class DockerImageService {
                 try {
                     // 直接调用checkAllImagesStatus方法
                     Map<String, Object> result = new HashMap<>();
-                     imageService.checkAllImagesStatus();
+                    imageService.checkAllImagesStatus();
                     result.put("result", true);
                     // 发送检查结果
                     messageSender.sendMessage(session, new DockerWebSocketMessage("CHECK_UPDATES_COMPLETE", taskId, result));
@@ -196,7 +200,7 @@ public class DockerImageService {
     private Map<String, Object> checkAllImagesStatus() {
         Map<String, Object> result = new HashMap<>();
         List<Image> images = dockerService.listImages();
-        
+
         for (Image image : images) {
             String[] repoTags = image.getRepoTags();
             if (repoTags != null && repoTags.length > 0) {
@@ -204,18 +208,18 @@ public class DockerImageService {
                     String[] parts = repoTag.split(":");
                     String imageName = parts[0];
                     String tag = parts.length > 1 ? parts[1] : "latest";
-                    
+
                     try {
                         // 获取本地镜像创建时间
                         String localCreateTime = dockerService.getLocalImageCreateTime(imageName, tag);
                         // 获取远程镜像创建时间
                         String remoteCreateTime = dockerService.getRemoteImageCreateTime(imageName, tag);
-                        
+
                         Map<String, Object> imageStatus = new HashMap<>();
                         imageStatus.put("localCreateTime", localCreateTime);
                         imageStatus.put("remoteCreateTime", remoteCreateTime);
                         imageStatus.put("hasUpdate", !localCreateTime.equals(remoteCreateTime));
-                        
+
                         result.put(repoTag, imageStatus);
                     } catch (Exception e) {
                         log.error("检查镜像 " + repoTag + " 更新状态失败: " + e.getMessage());
@@ -226,7 +230,7 @@ public class DockerImageService {
                 }
             }
         }
-        
+
         return result;
     }
 } 

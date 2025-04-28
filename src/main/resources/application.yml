@@ -22,9 +22,9 @@ docker:
   max-connections: 100
 
 
-# 文件下载配置
-file:
-  download:
-    path:
-      dev: /Users/lizhiqiang/coding-my/docker/docker-manager-back/src/main/resources/app
-      prod: /app/template 
+## 文件下载配置
+#file:
+#  download:
+#    path:
+#      dev: /Users/lizhiqiang/coding-my/docker/docker-manager-back/src/main/resources/app
+#      prod: /app/template

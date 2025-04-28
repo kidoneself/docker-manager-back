@@ -1,0 +1,25 @@
+{
+  "name": "example-container",
+  "image": "nginx:latest",
+  "env": {
+    "ENV_VAR1": "value1",
+    "ENV_VAR2": "value2"
+  },
+  "ports": {
+    "80": "8080",
+    "443": "8443"
+  },
+  "volumes": {
+    "/host/path": "/container/path"
+  },
+  "restartPolicy": "always",
+  "networkMode": "bridge",
+  "command": [
+    "bash",
+    "-c",
+    "echo hello"
+  ],
+  "entrypoint": [
+    "/docker-entrypoint.sh"
+  ]
+}

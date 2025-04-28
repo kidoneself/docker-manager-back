@@ -71,7 +71,11 @@ public class ContainerServiceImpl implements ContainerService {
 
     @Override
     public void stopContainer(String containerId) {
-        dockerService.stopContainer(containerId);
+        ResourceUsageDTO containerStats = dockerService.getContainerStats(containerId);
+        Boolean running = containerStats.getRunning();
+        if (running) {
+            dockerService.stopContainer(containerId);
+        }
     }
 
     @Override

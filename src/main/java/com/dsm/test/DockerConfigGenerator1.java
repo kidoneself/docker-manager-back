@@ -32,7 +32,7 @@ public class DockerConfigGenerator1 {
         hostConfigJson.set("Binds", buildBinds(container.path("Mounts")));  // 修正挂载点来源
         hostConfigJson.put("Privileged", hostConfig.path("Privileged").asBoolean());
         hostConfigJson.put("RestartPolicy", hostConfig.path("RestartPolicy").path("Name").asText());
-        // 从 inspect.json 读取网络模式
+        // 从 inspect2.json 读取网络模式
         hostConfigJson.put("NetworkMode", hostConfig.path("NetworkMode").asText());
         cmdJson.set("HostConfig", hostConfigJson);
 
@@ -80,7 +80,7 @@ public class DockerConfigGenerator1 {
 
     public static void main(String[] args) throws Exception {
         DockerConfigGenerator1.generateCmdJson(
-                "/Users/lizhiqiang/coding-my/docker/docker-manager-back/src/main/java/com/dsm/test/inspect.json",
+                "/Users/lizhiqiang/coding-my/docker/docker-manager-back/src/main/java/com/dsm/test/inspect2.json",
                 "/Users/lizhiqiang/coding-my/docker/docker-manager-back/src/main/java/com/dsm/test/cmd.json"
         );
     }

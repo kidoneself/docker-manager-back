@@ -700,7 +700,7 @@ public class DockerService {
             }
             processBuilder.redirectErrorStream(true);
             // 打印完整命令行
-            LogUtil.logSysInfo("执行命令: " + String.join(" ", command) + ",是否使用代理 " + proxyUrl.isBlank());
+            LogUtil.logSysInfo("执行命令: " + String.join(" ", command) + ",是否使用代理 " + !proxyUrl.isBlank());
             Process process = processBuilder.start();
             // 读取输出
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -766,8 +766,7 @@ public class DockerService {
     }
 
     public String startContainerWithCmd(CreateContainerCmd containerCmd) {
-        String containerId = dockerClientWrapper.startContainerWithCmd(containerCmd);
-        return containerId;
+        return dockerClientWrapper.startContainerWithCmd(containerCmd);
     }
 }
 
