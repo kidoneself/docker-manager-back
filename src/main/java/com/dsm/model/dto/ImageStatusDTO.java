@@ -1,4 +1,4 @@
-package com.dsm.pojo.dto;
+package com.dsm.model.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

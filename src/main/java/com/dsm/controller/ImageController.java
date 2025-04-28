@@ -1,8 +1,7 @@
 package com.dsm.controller;
 
-import com.dsm.pojo.dto.ImageStatusDTO;
+import com.dsm.model.dto.ImageStatusDTO;
 import com.dsm.pojo.dto.image.ImageInspectDTO;
-import com.dsm.pojo.request.ImagePullRequestV2;
 import com.dsm.service.ImageService;
 import com.dsm.utils.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,7 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,50 +23,6 @@ public class ImageController {
 
     @Resource
     ImageService imageService;
-
-
-    /**
-     * 拉取Docker镜像
-     *
-     * @param request 请求体，包含镜像名称和标签
-     * @return 包含任务ID的响应
-     */
-
-    @Operation(summary = "拉取镜像", description = "拉取指定的Docker镜像")
-    @PostMapping("/pull")
-    public ApiResponse<Map<String, String>> pullImage(@RequestBody ImagePullRequestV2 request) {
-        String taskId = imageService.pullImage(request);
-        Map<String, String> result = new HashMap<>();
-        result.put("taskId", taskId);
-        return ApiResponse.success(result);
-    }
-
-    /**
-     * 获取镜像拉取进度
-     *
-     * @param taskId 任务ID
-     * @return 拉取进度信息
-     */
-    @Operation(summary = "获取拉取进度", description = "获取指定任务的镜像拉取进度")
-    @GetMapping("/pull/progress/{taskId}")
-    public ApiResponse<Map<String, Object>> getPullProgress(@PathVariable String taskId) {
-        Map<String, Object> taskInfo = imageService.getPullProgress(taskId);
-        return ApiResponse.success(taskInfo);
-    }
-
-    /**
-     * 取消镜像拉取任务
-     *
-     * @param taskId 任务ID
-     * @return 操作结果
-     */
-    @Operation(summary = "取消拉取任务", description = "取消指定的镜像拉取任务")
-    @PostMapping("/pull/cancel/{taskId}")
-    public ApiResponse<Void> cancelPullTask(@PathVariable String taskId) {
-        imageService.cancelPullTask(taskId);
-        return ApiResponse.success(null);
-    }
-
 
     /**
      * 删除Docker镜像
@@ -83,15 +37,6 @@ public class ImageController {
         return ApiResponse.success("删除镜像成功");
     }
 
-    /**
-     *
-     * @return 代理延迟信息
-     */
-    @Operation(summary = "测试代理延迟", description = "测试Docker镜像仓库的代理延迟")
-    @GetMapping("/proxy/test")
-    public ApiResponse<Map<String, Long>> testProxyLatency() {
-        return ApiResponse.success(imageService.testProxyLatency());
-    }
 
 
     @Operation(summary = "列出镜像", description = "获取所有镜像的列表（包含更新状态信息）")
@@ -111,7 +56,6 @@ public class ImageController {
     public ApiResponse<Map<String, Object>> updateImage(@RequestBody Map<String, String> request) {
         String image = request.get("image");
         String tag = request.getOrDefault("tag", "latest");
-        boolean useProxy = Boolean.parseBoolean(request.getOrDefault("useProxy", "false"));
         Map<String, Object> result = imageService.updateImage(image, tag);
         return ApiResponse.success(result);
     }
@@ -141,9 +85,9 @@ public class ImageController {
      */
     @PostMapping("/detail")
     public ApiResponse<ImageInspectDTO> getImageDetail(@RequestBody Map<String, String> request) {
-            String imageName = request.get("imageName");
-            ImageInspectDTO imageDetail = imageService.getImageDetail(imageName);
-            return ApiResponse.success(imageDetail);
+        String imageName = request.get("imageName");
+        ImageInspectDTO imageDetail = imageService.getImageDetail(imageName);
+        return ApiResponse.success(imageDetail);
 
     }
 

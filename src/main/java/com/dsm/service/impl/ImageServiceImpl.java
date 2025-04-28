@@ -4,10 +4,9 @@ import com.dsm.api.DockerService;
 import com.dsm.config.AppConfig;
 import com.dsm.exception.BusinessException;
 import com.dsm.mapper.ImageStatusMapper;
-import com.dsm.pojo.dto.ImageStatusDTO;
+import com.dsm.model.dto.ImageStatusDTO;
 import com.dsm.pojo.dto.image.*;
 import com.dsm.pojo.entity.ImageStatus;
-import com.dsm.pojo.request.ImagePullRequestV2;
 import com.dsm.service.ImageService;
 import com.dsm.utils.LogUtil;
 import com.dsm.websocket.callback.PullImageCallback;
@@ -18,7 +17,6 @@ import com.github.dockerjava.api.model.ContainerConfig;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.Image;
 import com.github.dockerjava.core.DockerClientBuilder;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -27,14 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.Resource;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.net.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -43,117 +38,16 @@ import java.util.stream.Collectors;
  * 实现容器管理的具体业务逻辑
  */
 @Service
-@RequiredArgsConstructor
 public class ImageServiceImpl implements ImageService {
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     // 存储镜像拉取任务和进度信息
-    private static final ConcurrentHashMap<String, Map<String, Object>> imagePullTasks = new ConcurrentHashMap<>();
-    private final DockerService dockerService;
     @Resource
-    ImageStatusMapper imageStatusMapper;
+    private DockerService dockerService;
+    @Resource
+    private ImageStatusMapper imageStatusMapper;
     @Autowired
     private AppConfig appConfig;
 
-    @Override
-    public String pullImage(ImagePullRequestV2 request) {
-        String image = request.getImage();
-        String tag = request.getTag();
-        String taskId = UUID.randomUUID().toString();
-
-        if (image == null || image.isEmpty()) {
-            throw new BusinessException("image is empty");
-        }
-
-        // 创建任务信息
-        Map<String, Object> taskInfo = new HashMap<>();
-        taskInfo.put("image", image);
-        taskInfo.put("tag", tag);
-        taskInfo.put("status", "pending");
-        taskInfo.put("progress", 0);
-        taskInfo.put("message", "等待开始");
-        taskInfo.put("completed", false);
-        taskInfo.put("error", false);
-        imagePullTasks.put(taskId, taskInfo);
-
-        // 异步执行拉取操作
-        CompletableFuture.runAsync(() -> {
-            Thread.currentThread().setName("docker-pull-" + taskId);
-            try {
-                LogUtil.logSysInfo("开始拉取镜像: " + image + ":" + tag + " (任务ID: " + taskId + ")");
-
-                // 使用DockerService的pullImage方法，通过回调更新进度
-                dockerService.pullImage(image, tag, new PullImageCallback() {
-                    @Override
-                    public void onProgress(int progress, String status) {
-                        updateTaskStatus(taskId, "running", progress, status, false, false);
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        updateTaskStatus(taskId, "success", 100, "镜像拉取成功", false, true);
-                        LogUtil.logSysInfo("镜像拉取成功: " + image + ":" + tag + " (任务ID: " + taskId + ")");
-                        LogUtil.log("成功拉取镜像: " + image + ":" + tag);
-
-                        // 同步镜像信息到数据库
-                        try {
-                            Map<String, Object> syncResult = syncLocalImageToDb(image, tag);
-                            LogUtil.logSysInfo("同步镜像信息到数据库成功: " + image + ":" + tag + ", 结果: " + syncResult);
-                        } catch (Exception e) {
-                            LogUtil.logSysError("同步镜像信息到数据库失败: " + image + ":" + tag + ", 错误: " + e.getMessage());
-                        }
-                    }
-
-                    @Override
-                    public void onError(String error) {
-                        updateTaskStatus(taskId, "failed", 0, error, true, true);
-                        LogUtil.logSysError("镜像拉取失败: " + image + ":" + tag + " (任务ID: " + taskId + "), 错误: " + error);
-                        LogUtil.logSysError("拉取镜像失败: " + image + ":" + tag + ", 错误: " + error);
-                    }
-                });
-            } catch (Exception e) {
-                updateTaskStatus(taskId, "failed", 0, e.getMessage(), true, true);
-                LogUtil.logSysError("镜像拉取失败: " + image + ":" + tag + " (任务ID: " + taskId + "), 错误: " + e.getMessage());
-                LogUtil.logSysError("拉取镜像失败: " + image + ":" + tag + ", 错误: " + e.getMessage());
-            }
-        });
-
-        return taskId;
-    }
-
-    @Override
-    public Map<String, Object> getPullProgress(String taskId) {
-        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
-        if (taskInfo == null) {
-            throw new BusinessException("镜像拉取任务不存在: " + taskId);
-        }
-        return taskInfo;
-    }
-
-    @Override
-    public void cancelPullTask(String taskId) {
-        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
-
-        if (taskInfo == null) {
-            LogUtil.logSysError("找不到指定的拉取任务: " + taskId);
-            throw new BusinessException("找不到指定的拉取任务");
-
-        }
-
-        // 尝试取消Docker操作（具体实现取决于Docker客户端库是否支持）
-        String image = (String) taskInfo.get("image");
-        String tag = (String) taskInfo.get("tag");
-
-        // 调用Docker服务取消拉取操作
-        dockerService.cancelPullImage(image + ":" + tag);
-
-        // 更新任务状态为已取消
-        updateTaskStatus(taskId, "canceled", 0, "用户取消了拉取任务", false, false);
-
-        LogUtil.log("用户取消了拉取镜像: " + image + ":" + tag);
-
-        LogUtil.logSysInfo("成功取消镜像拉取任务: " + taskId);
-
-    }
 
     @Override
     @Transactional
@@ -185,174 +79,6 @@ public class ImageServiceImpl implements ImageService {
         }
     }
 
-    /**
-     * 解析代理URL，提取用户名、密码、主机和端口
-     *
-     * @param proxyUrl 代理URL，格式如：http://username:password@host:port 或 http://host:port
-     * @return 包含代理信息的Map
-     */
-    private Map<String, String> parseProxyUrl(String proxyUrl) {
-        Map<String, String> result = new HashMap<>();
-        try {
-            URL url = new URL(proxyUrl);
-            String userInfo = url.getUserInfo();
-
-            // 设置主机和端口
-            result.put("host", url.getHost());
-            result.put("port", String.valueOf(url.getPort()));
-
-            // 如果有用户认证信息
-            if (userInfo != null && !userInfo.isEmpty()) {
-                String[] auth = userInfo.split(":");
-                if (auth.length == 2) {
-                    result.put("username", auth[0]);
-                    result.put("password", auth[1]);
-                }
-            }
-
-            LogUtil.logSysInfo("解析代理URL: " + proxyUrl + ", 结果: " + result);
-            return result;
-        } catch (Exception e) {
-            LogUtil.logSysError("解析代理URL失败: " + e.getMessage());
-            throw new RuntimeException("解析代理URL失败: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public Map<String, Long> testProxyLatency() {
-        Map<String, Long> result = new HashMap<>();
-        try {
-            String proxyUrl = appConfig.getProxyUrl();
-            Map<String, String> proxyInfo = parseProxyUrl(proxyUrl);
-
-            // 设置代理认证（只有当用户名和密码都存在时才设置）
-            if (proxyInfo.containsKey("username") && proxyInfo.containsKey("password")) {
-                Authenticator.setDefault(new Authenticator() {
-                    @Override
-                    protected PasswordAuthentication getPasswordAuthentication() {
-                        return new PasswordAuthentication(proxyInfo.get("username"), proxyInfo.get("password").toCharArray());
-                    }
-                });
-                LogUtil.logSysInfo("已设置代理认证信息");
-            } else {
-                LogUtil.logSysInfo("未设置代理认证信息，将使用无认证代理");
-            }
-
-            // 创建HTTP代理对象
-            Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyInfo.get("host"), Integer.parseInt(proxyInfo.get("port"))));
-
-            // 测试HTTP连接
-            long httpStartTime = System.currentTimeMillis();
-            URL httpUrl = new URL("http://registry-1.docker.io/v2/");
-            HttpURLConnection httpConnection = (HttpURLConnection) httpUrl.openConnection(proxy);
-            httpConnection.setConnectTimeout(5000);
-            httpConnection.setReadTimeout(5000);
-            httpConnection.connect();
-            int httpResponseCode = httpConnection.getResponseCode();
-            long httpResponseTime = System.currentTimeMillis() - httpStartTime;
-
-            // 测试HTTPS连接
-            long httpsStartTime = System.currentTimeMillis();
-            URL httpsUrl = new URL("https://registry-1.docker.io/v2/");
-            HttpURLConnection httpsConnection = (HttpURLConnection) httpsUrl.openConnection(proxy);
-            httpsConnection.setConnectTimeout(5000);
-            httpsConnection.setReadTimeout(5000);
-            httpsConnection.connect();
-            int httpsResponseCode = httpsConnection.getResponseCode();
-            long httpsResponseTime = System.currentTimeMillis() - httpsStartTime;
-
-            // 记录结果
-            result.put("httpConnectTime", httpResponseTime);
-            result.put("httpStatus", (long) httpResponseCode);
-            result.put("httpsConnectTime", httpsResponseTime);
-            result.put("httpsStatus", (long) httpsResponseCode);
-            result.put("totalTime", Math.max(httpResponseTime, httpsResponseTime));
-            // 根据延迟时间给出建议
-            long totalTime = result.get("totalTime");
-            String suggestion;
-            if (totalTime < 500) {
-                suggestion = "代理速度良好，建议使用代理";
-            } else if (totalTime < 1000) {
-                suggestion = "代理速度一般，可以使用代理";
-            } else if (totalTime < 2000) {
-                suggestion = "代理速度较慢，建议检查代理配置";
-            } else {
-                suggestion = "代理速度很慢，建议不使用代理";
-            }
-
-            // 添加建议到返回结果
-            result.put("suggestion", (long) suggestion.hashCode());
-            LogUtil.logSysInfo("代理延迟测试结果: HTTP连接时间=" + httpResponseTime + "ms, HTTP状态码=" + httpResponseCode + ", HTTPS连接时间=" + httpsResponseTime + "ms, HTTPS状态码=" + httpsResponseCode);
-
-        } catch (Exception e) {
-            LogUtil.logSysError("测试代理延迟失败: " + e.getMessage());
-            result.put("error", 1L);
-            result.put("message", (long) e.getMessage().hashCode());
-        } finally {
-            // 清除代理认证
-            Authenticator.setDefault(null);
-        }
-        return result;
-    }
-
-//    @Override
-//    public List<ImageStatusDTO> listImageStatus() {
-//        LogUtil.logSysInfo("获取镜像状态列表");
-//        try {
-//            // 先同步宿主机镜像到数据库，确保显示最新数据
-//            syncAllLocalImagesToDb();
-//
-//            // 获取所有本地镜像
-//            List<Image> images = dockerService.listImages();
-//
-//            // 获取数据库中的所有镜像状态记录
-//            List<ImageStatus> dbRecords = imageStatusMapper.selectAll();
-//
-//            // 构建数据库记录的映射表，键为"name:tag"
-//            Map<String, ImageStatus> dbRecordsMap = dbRecords.stream().collect(Collectors.toMap(record -> record.getName() + ":" + record.getTag(), record -> record, (existing, replacement) -> existing // 如果有重复，保留第一个
-//            ));
-//
-//            // 合并本地镜像和数据库记录
-//            List<ImageStatusDTO> result = new ArrayList<>();
-//
-//            for (Image image : images) {
-//                String[] repoTags = image.getRepoTags();
-//                if (repoTags != null) {
-//                    for (String repoTag : repoTags) {
-//                        if (!"<none>:<none>".equals(repoTag)) {
-//                            String[] parts = repoTag.split(":");
-//                            String name = parts[0];
-//                            String tag = parts.length > 1 ? parts[1] : "latest";
-//
-//                            ImageStatusDTO imageStatusDTO = ImageStatusDTO.builder().id(image.getId()).name(name).tag(tag).size(image.getSize()).created(new Date(image.getCreated() * 1000L)).build();
-//
-//                            // 添加状态信息
-//                            ImageStatus statusRecord = dbRecordsMap.get(name + ":" + tag);
-//                            if (statusRecord != null) {
-//                                imageStatusDTO.setNeedUpdate(statusRecord.getNeedUpdate());
-//                                imageStatusDTO.setStatusId(statusRecord.getId());
-//                                imageStatusDTO.setLocalCreateTime(statusRecord.getLocalCreateTime());
-//                                imageStatusDTO.setRemoteCreateTime(statusRecord.getRemoteCreateTime());
-//
-//                                // 将ISO格式日期字符串转换为Date对象
-//                                String lastCheckedStr = statusRecord.getLastChecked();
-//                                if (lastCheckedStr != null && !lastCheckedStr.isEmpty()) {
-//                                    imageStatusDTO.setLastChecked(parseIsoDate(lastCheckedStr));
-//                                }
-//                            }
-//
-//                            result.add(imageStatusDTO);
-//                        }
-//                    }
-//                }
-//            }
-//
-//            return result;
-//        } catch (Exception e) {
-//            LogUtil.logSysError("获取镜像状态列表失败: " + e.getMessage());
-//            throw new RuntimeException("获取镜像状态列表失败: " + e.getMessage());
-//        }
-//    }
 
     /**
      * 每小时定时检查所有镜像更新状态
@@ -371,7 +97,6 @@ public class ImageServiceImpl implements ImageService {
             LogUtil.logSysInfo("找到 " + imageRecords.size() + " 条镜像记录需要检查");
             for (ImageStatus record : imageRecords) {
                 try {
-                    LogUtil.logSysInfo("=".repeat(100));
                     String name = record.getName();
                     String tag = record.getTag();
                     String storedLocalCreateTime = record.getLocalCreateTime();
@@ -396,7 +121,6 @@ public class ImageServiceImpl implements ImageService {
         } catch (Exception e) {
             LogUtil.logSysError("检查镜像更新状态失败: " + e.getMessage());
         }
-        LogUtil.logSysInfo("=".repeat(100));
     }
 
     @Override
@@ -524,14 +248,7 @@ public class ImageServiceImpl implements ImageService {
 
             if (existingRecord == null) {
                 // 插入新记录
-                ImageStatus imageStatus = ImageStatus.builder()
-                        .name(imageName)
-                        .tag(tag)
-                        .localCreateTime(localCreateTime)
-                        .remoteCreateTime(localCreateTime)
-                        .needUpdate(false)
-                        .lastChecked(currentTime)
-                        .build();
+                ImageStatus imageStatus = ImageStatus.builder().name(imageName).tag(tag).localCreateTime(localCreateTime).remoteCreateTime(localCreateTime).needUpdate(false).lastChecked(currentTime).build();
 
                 imageStatusMapper.insert(imageStatus);
                 LogUtil.logSysInfo("已创建镜像状态记录: " + imageName + ":" + tag);
@@ -596,14 +313,8 @@ public class ImageServiceImpl implements ImageService {
 
                                 if (existingRecord == null) {
                                     // 插入新记录
-                                    ImageStatus imageStatus = ImageStatus.builder()
-                                            .name(name)
-                                            .tag(tag)
-                                            .localCreateTime(localCreateTime)
-                                            .remoteCreateTime(localCreateTime) // 初始设置与本地相同，表示不需要更新
-                                            .needUpdate(false)
-                                            .lastChecked(currentTime)
-                                            .build();
+                                    ImageStatus imageStatus = ImageStatus.builder().name(name).tag(tag).localCreateTime(localCreateTime).remoteCreateTime(localCreateTime) // 初始设置与本地相同，表示不需要更新
+                                            .needUpdate(false).lastChecked(currentTime).build();
 
                                     imageStatusMapper.insert(imageStatus);
                                     LogUtil.logSysInfo("已创建镜像状态记录: " + name + ":" + tag);
@@ -940,30 +651,6 @@ public class ImageServiceImpl implements ImageService {
         return imageInspectDTO;
     }
 
-    /**
-     * 更新任务状态
-     *
-     * @param taskId      任务ID
-     * @param status      状态
-     * @param progress    进度
-     * @param message     消息
-     * @param isError     是否错误
-     * @param isCompleted 是否完成
-     */
-    private void updateTaskStatus(String taskId, String status, int progress, String message, boolean isError, boolean isCompleted) {
-        Map<String, Object> taskInfo = imagePullTasks.get(taskId);
-        if (taskInfo != null) {
-            taskInfo.put("status", status);
-            taskInfo.put("progress", progress);
-            taskInfo.put("message", message);
-            taskInfo.put("isError", isError);
-            taskInfo.put("completed", isCompleted);
-            taskInfo.put("updateTime", System.currentTimeMillis());
-
-            // 发送WebSocket消息
-            sendPullProgressMessage(taskId, taskInfo);
-        }
-    }
 
     /**
      * 通过WebSocket发送进度消息

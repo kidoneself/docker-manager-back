@@ -28,12 +28,11 @@ public class ProxyConfigLoader {
         }
         JSONObject jsonObject = JSONObject.parseObject(proxyUrl);
         String url = jsonObject.getString("url");
-        appConfig.setProxyUrl(url); // ✅ 设置到全局字段
-        try {
-            // URI uri = new URI(url);
+        if (!url.isBlank()) {
+            appConfig.setProxyUrl(url); // ✅ 设置到全局字段
             LogUtil.logSysInfo("已设置系统 HTTP 代理: " + proxyUrl);
-        } catch (Exception e) {
-            LogUtil.logSysError("代理地址格式不正确：" + proxyUrl);
+        } else {
+            LogUtil.logSysInfo("未设置HTTP代理，跳过代理设置");
         }
     }
 }

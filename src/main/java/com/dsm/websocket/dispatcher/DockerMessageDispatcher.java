@@ -44,6 +44,12 @@ public class DockerMessageDispatcher {
                 case "INSTALL_START":
                     installService.handleInstallStart(session, message);
                     break;
+                case "UPDATE_IMAGE":
+                    imageService.handleUpdateImage(session, message);
+                    break;
+                case "CHECK_IMAGE_UPDATES":
+                    imageService.handleCheckImageUpdates(session, message);
+                    break;
                 default:
                     log.warn("未知的消息类型: {}", message.getType());
             }

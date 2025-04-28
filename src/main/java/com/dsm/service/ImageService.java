@@ -1,8 +1,7 @@
 package com.dsm.service;
 
-import com.dsm.pojo.dto.ImageStatusDTO;
+import com.dsm.model.dto.ImageStatusDTO;
 import com.dsm.pojo.dto.image.ImageInspectDTO;
-import com.dsm.pojo.request.ImagePullRequestV2;
 
 import java.util.List;
 import java.util.Map;
@@ -13,15 +12,8 @@ import java.util.Map;
  */
 public interface ImageService {
 
-    String pullImage(ImagePullRequestV2 request);
-
-    Map<String, Object> getPullProgress(String taskId);
-
-    void cancelPullTask(String taskId);
 
     void removeImage(String imageId, boolean removeStatus);
-
-    Map<String, Long> testProxyLatency();
 
     void checkAllImagesStatus();
 

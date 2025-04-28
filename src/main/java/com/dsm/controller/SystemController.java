@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/system")
-@RequiredArgsConstructor
 @Tag(name = "系统管理", description = "系统状态和监控接口")
 public class SystemController {
 
@@ -69,5 +69,14 @@ public class SystemController {
         List<Route> objects = new ArrayList<>();
         objects.add(new Route());
         return ApiResponse.success(objects);
+    }
+
+    /**
+     * @return 代理延迟信息
+     */
+    @Operation(summary = "测试代理延迟", description = "测试Docker镜像仓库的代理延迟")
+    @GetMapping("/proxy/test")
+    public ApiResponse<Map<String, Long>> testProxyLatency() {
+        return ApiResponse.success(systemSettingService.testProxyLatency());
     }
 }
